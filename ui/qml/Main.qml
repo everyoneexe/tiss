@@ -20,6 +20,8 @@ ApplicationWindow {
     property bool showPassword: false
     property bool showPasswordToggle: iiShowPasswordToggle
     property string lastSessionId: iiLastSessionId
+    property string lastProfileId: iiLastProfileId
+    property string lastLocale: iiLastLocale
     property int promptId: -1
     property string promptKind: ""
     property string promptMessage: ""
@@ -81,6 +83,14 @@ ApplicationWindow {
         }
         if (lastSessionId.length > 0) {
             backend.selectedSessionId = lastSessionId
+        }
+        if (lastProfileId.length > 0) {
+            backend.selectedProfileId = lastProfileId
+        }
+        if (lastLocale.length > 0) {
+            backend.selectedLocale = lastLocale
+        } else if (iiLocales && iiLocales.default) {
+            backend.selectedLocale = iiLocales.default
         }
         usernameField.forceActiveFocus()
     }

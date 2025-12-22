@@ -12,6 +12,8 @@ class BackendProcess : public QObject {
     Q_PROPERTY(QStringList sessionCommand READ sessionCommand WRITE setSessionCommand NOTIFY sessionConfigChanged)
     Q_PROPERTY(QVariantMap sessionEnv READ sessionEnv WRITE setSessionEnv NOTIFY sessionConfigChanged)
     Q_PROPERTY(QString selectedSessionId READ selectedSessionId WRITE setSelectedSessionId NOTIFY sessionConfigChanged)
+    Q_PROPERTY(QString selectedProfileId READ selectedProfileId WRITE setSelectedProfileId NOTIFY sessionConfigChanged)
+    Q_PROPERTY(QString selectedLocale READ selectedLocale WRITE setSelectedLocale NOTIFY sessionConfigChanged)
 public:
     explicit BackendProcess(QObject *parent = nullptr);
     ~BackendProcess() override;
@@ -21,16 +23,21 @@ public:
     Q_INVOKABLE void ackPrompt(int id);
     Q_INVOKABLE void cancelAuth();
     Q_INVOKABLE void startSession(const QStringList &command);
+    Q_INVOKABLE void requestPower(const QString &action);
 
     QString phase() const { return m_phase; }
     bool busy() const { return m_phase == "auth" || m_phase == "waiting"; }
     QStringList sessionCommand() const { return m_sessionCommand; }
     QVariantMap sessionEnv() const { return m_sessionEnv; }
     QString selectedSessionId() const { return m_selectedSessionId; }
+    QString selectedProfileId() const { return m_selectedProfileId; }
+    QString selectedLocale() const { return m_selectedLocale; }
 
     void setSessionCommand(const QStringList &command);
     void setSessionEnv(const QVariantMap &env);
     void setSelectedSessionId(const QString &sessionId);
+    void setSelectedProfileId(const QString &profileId);
+    void setSelectedLocale(const QString &locale);
 
 signals:
     void phaseChanged();
@@ -56,4 +63,6 @@ private:
     QStringList m_sessionCommand;
     QVariantMap m_sessionEnv;
     QString m_selectedSessionId;
+    QString m_selectedProfileId;
+    QString m_selectedLocale;
 };
