@@ -1,0 +1,58 @@
+# Maintainer: local
+
+pkgname=ii-greetd-qml
+pkgver=0.1.0.r0.g0000000
+pkgrel=1
+pkgdesc="QML-based greetd greeter (ii-greetd)"
+arch=(x86_64)
+license=(custom)
+depends=(qt6-base qt6-declarative greetd cage libseat)
+makedepends=(cmake rust cargo git)
+optdepends=(
+  "seatd: seat management backend if not using logind"
+)
+install=ii-greetd-qml.install
+
+# Update this URL to your repo.
+_repo_url="https://example.com/ii-greetd-qml.git"
+source=("${pkgname}::git+${_repo_url}")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "${srcdir}/${pkgname}"
+  local tag
+  tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+  if [[ -n "${tag}" ]]; then
+    printf "%s.r%s.g%s" \
+      "${tag#v}" \
+      "$(git rev-list --count HEAD)" \
+      "$(git rev-parse --short HEAD)"
+  else
+    printf "0.1.0.r%s.g%s" \
+      "$(git rev-list --count HEAD)" \
+      "$(git rev-parse --short HEAD)"
+  fi
+}
+
+build() {
+  local root="${srcdir}/${pkgname}"
+
+  cd "${root}/backend"
+  CARGO_TARGET_DIR="${srcdir}/target" cargo build --release
+
+  cmake -S "${root}/ui" -B "${srcdir}/build-ui" -DCMAKE_BUILD_TYPE=Release
+  cmake --build "${srcdir}/build-ui"
+}
+
+package() {
+  local root="${srcdir}/${pkgname}"
+
+  install -Dm755 "${srcdir}/target/release/ii-greetd-backend" "${pkgdir}/usr/lib/ii-greetd/ii-greetd-backend"
+  install -Dm755 "${srcdir}/build-ui/ii-greetd-ui" "${pkgdir}/usr/bin/ii-greetd-ui"
+
+  install -Dm644 "${root}/ui/qml/Main.qml" "${pkgdir}/usr/share/ii-greetd/qml/Main.qml"
+  install -Dm644 "${root}/docs/greetd-config.toml.example" "${pkgdir}/usr/share/ii-greetd/greetd-config.toml.example"
+
+  install -Dm644 "${root}/README.md" "${pkgdir}/usr/share/doc/ii-greetd-qml/README.md"
+  install -Dm644 "${root}/docs/run.md" "${pkgdir}/usr/share/doc/ii-greetd-qml/run.md"
+}

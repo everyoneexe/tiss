@@ -1,0 +1,11 @@
+# Rust
+/backend/target/
+
+# Qt / CMake
+/ui/build/
+/ui/.qt/
+
+# Editors
+*.swp
+*.swo
+.DS_Store
