@@ -14,7 +14,7 @@ optdepends=(
 install=ii-greetd-qml.install
 
 # Update this URL to your repo.
-_repo_url="https://example.com/ii-greetd-qml.git"
+_repo_url="git@github.com:everyoneexe/ingress.git"
 source=("${pkgname}::git+${_repo_url}")
 sha256sums=('SKIP')
 
@@ -40,6 +40,9 @@ build() {
   cd "${root}/backend"
   CARGO_TARGET_DIR="${srcdir}/target" cargo build --release
 
+  cd "${root}/launcher"
+  CARGO_TARGET_DIR="${srcdir}/target" cargo build --release
+
   cmake -S "${root}/ui" -B "${srcdir}/build-ui" -DCMAKE_BUILD_TYPE=Release
   cmake --build "${srcdir}/build-ui"
 }
@@ -49,9 +52,11 @@ package() {
 
   install -Dm755 "${srcdir}/target/release/ii-greetd-backend" "${pkgdir}/usr/lib/ii-greetd/ii-greetd-backend"
   install -Dm755 "${srcdir}/build-ui/ii-greetd-ui" "${pkgdir}/usr/bin/ii-greetd-ui"
+  install -Dm755 "${srcdir}/target/release/ii-greetd-launcher" "${pkgdir}/usr/bin/ii-greetd-launcher"
 
   install -Dm644 "${root}/ui/qml/Main.qml" "${pkgdir}/usr/share/ii-greetd/qml/Main.qml"
   install -Dm644 "${root}/docs/greetd-config.toml.example" "${pkgdir}/usr/share/ii-greetd/greetd-config.toml.example"
+  install -Dm644 "${root}/docs/ii-greetd-config.toml.example" "${pkgdir}/usr/share/ii-greetd/config.toml.example"
 
   install -Dm644 "${root}/README.md" "${pkgdir}/usr/share/doc/ii-greetd-qml/README.md"
   install -Dm644 "${root}/docs/run.md" "${pkgdir}/usr/share/doc/ii-greetd-qml/run.md"
