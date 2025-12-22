@@ -18,7 +18,10 @@ fn run() -> Result<(), String> {
     let config = load_config();
     let session_json_explicit = !env_missing("II_GREETD_SESSION_JSON");
     apply_config_env(&config)?;
-    configure_sessions(session_json_explicit);
+    let state = load_state();
+    configure_sessions(session_json_explicit, &state);
+    configure_profiles_locales(&config, &state);
+    configure_power(&config);
     ensure_seat_backend(&config);
     ensure_log_dir();
     ensure_cache_env();
@@ -52,10 +55,30 @@ struct SessionEntry {
     desktop_file: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize)]
+struct ProfileEntry {
+    id: String,
+    name: String,
+    session: String,
+    env: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Serialize)]
+struct LocalesEntry {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default: Option<String>,
+    #[serde(default)]
+    available: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
 struct PersistedState {
     #[serde(default)]
     last_session_id: Option<String>,
+    #[serde(default)]
+    last_profile_id: Option<String>,
+    #[serde(default)]
+    last_locale: Option<String>,
 }
 
 fn load_config() -> Config {
@@ -177,7 +200,7 @@ fn apply_config_env(config: &Config) -> Result<(), String> {
     Ok(())
 }
 
-fn configure_sessions(session_json_explicit: bool) {
+fn configure_sessions(session_json_explicit: bool, state: &PersistedState) {
     let sessions = discover_sessions();
     if let Ok(json) = serde_json::to_string(&sessions) {
         set_env_if_missing("II_GREETD_SESSIONS_JSON", Some(json));
@@ -185,10 +208,16 @@ fn configure_sessions(session_json_explicit: bool) {
         eprintln!("ii-greetd-launcher: failed to serialize session list");
     }
 
-    let last_session = load_last_session_id();
-    if let Some(last_session_id) = last_session.as_ref() {
+    let mut selected_session_id = env::var("II_GREETD_LAST_SESSION_ID")
+        .ok()
+        .and_then(|value| if value.trim().is_empty() { None } else { Some(value) });
+    if selected_session_id.is_none() {
+        selected_session_id = state.last_session_id.clone();
+    }
+
+    if let Some(last_session_id) = selected_session_id.as_ref() {
         if sessions.iter().any(|session| session.id == *last_session_id) {
-            env::set_var("II_GREETD_LAST_SESSION_ID", last_session_id);
+            set_env_if_missing("II_GREETD_LAST_SESSION_ID", Some(last_session_id.clone()));
             if !session_json_explicit {
                 if let Some(session) = sessions.iter().find(|session| session.id == *last_session_id) {
                     if let Ok(json) = serde_json::to_string(&session.exec) {
@@ -197,6 +226,65 @@ fn configure_sessions(session_json_explicit: bool) {
                 }
             }
         }
+    }
+}
+
+fn configure_profiles_locales(config: &Config, state: &PersistedState) {
+    if !config.profiles.is_empty() {
+        let entries: Vec<ProfileEntry> = config
+            .profiles
+            .iter()
+            .map(|profile| ProfileEntry {
+                id: profile.id.clone(),
+                name: profile.name.clone(),
+                session: profile.session.clone(),
+                env: profile.env.clone(),
+            })
+            .collect();
+        if let Ok(json) = serde_json::to_string(&entries) {
+            set_env_if_missing("II_GREETD_PROFILES_JSON", Some(json));
+        } else {
+            eprintln!("ii-greetd-launcher: failed to serialize profiles");
+        }
+    }
+
+    let locales = LocalesEntry {
+        default: config.locales.default.clone(),
+        available: config.locales.available.clone(),
+    };
+    if locales.default.as_ref().map(|v| !v.trim().is_empty()).unwrap_or(false)
+        || !locales.available.is_empty()
+    {
+        if let Ok(json) = serde_json::to_string(&locales) {
+            set_env_if_missing("II_GREETD_LOCALES_JSON", Some(json));
+        } else {
+            eprintln!("ii-greetd-launcher: failed to serialize locales");
+        }
+    }
+
+    if let Some(last_profile_id) = state.last_profile_id.as_ref() {
+        if config.profiles.iter().any(|profile| profile.id == *last_profile_id) {
+            set_env_if_missing("II_GREETD_LAST_PROFILE_ID", Some(last_profile_id.clone()));
+        }
+    }
+
+    if let Some(last_locale) = state.last_locale.as_ref() {
+        if config.locales.available.is_empty()
+            || config.locales.available.iter().any(|locale| locale == last_locale)
+        {
+            set_env_if_missing("II_GREETD_LAST_LOCALE", Some(last_locale.clone()));
+        }
+    }
+}
+
+fn configure_power(config: &Config) {
+    if config.power.enabled.is_empty() {
+        return;
+    }
+    if let Ok(json) = serde_json::to_string(&config.power.enabled) {
+        set_env_if_missing("II_GREETD_POWER_ACTIONS_JSON", Some(json));
+    } else {
+        eprintln!("ii-greetd-launcher: failed to serialize power actions");
     }
 }
 
@@ -383,17 +471,27 @@ fn try_exec_exists(token: &str) -> bool {
     find_executable(token).is_some()
 }
 
-fn load_last_session_id() -> Option<String> {
+fn load_state() -> PersistedState {
     let path = state_path();
-    let content = fs::read_to_string(path).ok()?;
-    let state: PersistedState = serde_json::from_str(&content).ok()?;
-    state.last_session_id.and_then(|id| {
-        if id.trim().is_empty() {
-            None
-        } else {
-            Some(id)
+    let content = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(_) => return PersistedState::default(),
+    };
+    let mut state: PersistedState = match serde_json::from_str(&content) {
+        Ok(state) => state,
+        Err(err) => {
+            eprintln!(
+                "ii-greetd-launcher: failed to parse state {}: {}",
+                path.display(),
+                err
+            );
+            return PersistedState::default();
         }
-    })
+    };
+    state.last_session_id = state.last_session_id.filter(|id| !id.trim().is_empty());
+    state.last_profile_id = state.last_profile_id.filter(|id| !id.trim().is_empty());
+    state.last_locale = state.last_locale.filter(|locale| !locale.trim().is_empty());
+    state
 }
 
 fn state_path() -> PathBuf {

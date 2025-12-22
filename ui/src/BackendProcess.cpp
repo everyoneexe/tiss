@@ -42,6 +42,12 @@ void BackendProcess::authenticate(const QString &username) {
     if (!m_selectedSessionId.isEmpty()) {
         obj.insert("session_id", m_selectedSessionId);
     }
+    if (!m_selectedProfileId.isEmpty()) {
+        obj.insert("profile_id", m_selectedProfileId);
+    }
+    if (!m_selectedLocale.isEmpty()) {
+        obj.insert("locale", m_selectedLocale);
+    }
     if (!m_sessionCommand.isEmpty()) {
         QJsonArray cmd;
         for (const auto &part : m_sessionCommand) {
@@ -100,6 +106,13 @@ void BackendProcess::startSession(const QStringList &command) {
     sendJson(obj);
 }
 
+void BackendProcess::requestPower(const QString &action) {
+    QJsonObject obj;
+    obj.insert("type", "power");
+    obj.insert("action", action);
+    sendJson(obj);
+}
+
 void BackendProcess::setSessionCommand(const QStringList &command) {
     if (m_sessionCommand == command) {
         return;
@@ -121,6 +134,22 @@ void BackendProcess::setSelectedSessionId(const QString &sessionId) {
         return;
     }
     m_selectedSessionId = sessionId;
+    emit sessionConfigChanged();
+}
+
+void BackendProcess::setSelectedProfileId(const QString &profileId) {
+    if (m_selectedProfileId == profileId) {
+        return;
+    }
+    m_selectedProfileId = profileId;
+    emit sessionConfigChanged();
+}
+
+void BackendProcess::setSelectedLocale(const QString &locale) {
+    if (m_selectedLocale == locale) {
+        return;
+    }
+    m_selectedLocale = locale;
     emit sessionConfigChanged();
 }
 

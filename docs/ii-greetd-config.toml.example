@@ -39,6 +39,27 @@ XDG_SESSION_CLASS = "user"
 XDG_CURRENT_DESKTOP = "niri"
 XDG_SESSION_DESKTOP = "niri"
 
+[[profiles]]
+id = "work"
+name = "Work"
+session = "niri"
+[profiles.env]
+NVIDIA_PRIME = "1"
+
+[[profiles]]
+id = "gaming"
+name = "Gaming"
+session = "niri"
+[profiles.env]
+__GL_SYNC_TO_VBLANK = "0"
+
+[locales]
+default = "tr_TR.UTF-8"
+available = ["tr_TR.UTF-8", "en_US.UTF-8"]
+
+[power]
+enabled = ["poweroff", "reboot", "suspend"]
+
 [logging]
 # Directory for UI/backend logs.
 dir = "/tmp/ii-greetd-logs"

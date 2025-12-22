@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::io::{self, BufRead, Write};
@@ -64,9 +64,30 @@ fn send_error(out: &mut dyn Write, code: &str, message: impl Into<String>) -> Re
     )
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize)]
+struct SessionListEntry {
+    id: String,
+    #[serde(default)]
+    exec: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProfileEntry {
+    id: String,
+    #[serde(default)]
+    session: String,
+    #[serde(default)]
+    env: HashMap<String, String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
 struct PersistedState {
-    last_session_id: String,
+    #[serde(default)]
+    last_session_id: Option<String>,
+    #[serde(default)]
+    last_profile_id: Option<String>,
+    #[serde(default)]
+    last_locale: Option<String>,
 }
 
 fn read_line(reader: &mut dyn BufRead) -> Result<Option<String>> {
@@ -145,11 +166,89 @@ fn state_path() -> std::path::PathBuf {
     std::path::PathBuf::from("/tmp/ii-greetd-state.json")
 }
 
-fn persist_last_session(session_id: &str, log: &mut logging::Logger) {
-    let session_id = session_id.trim();
-    if session_id.is_empty() {
-        return;
+fn load_sessions(log: &mut logging::Logger) -> HashMap<String, Vec<String>> {
+    let raw = env::var("II_GREETD_SESSIONS_JSON").unwrap_or_default();
+    if raw.trim().is_empty() {
+        return HashMap::new();
     }
+    let entries: Vec<SessionListEntry> = match serde_json::from_str(&raw) {
+        Ok(entries) => entries,
+        Err(err) => {
+            log.log(&format!("invalid II_GREETD_SESSIONS_JSON: {}", err));
+            return HashMap::new();
+        }
+    };
+    let mut sessions = HashMap::new();
+    for entry in entries {
+        if entry.id.trim().is_empty() || entry.exec.is_empty() {
+            continue;
+        }
+        sessions.insert(entry.id, entry.exec);
+    }
+    sessions
+}
+
+fn load_profiles(log: &mut logging::Logger) -> HashMap<String, ProfileEntry> {
+    let raw = env::var("II_GREETD_PROFILES_JSON").unwrap_or_default();
+    if raw.trim().is_empty() {
+        return HashMap::new();
+    }
+    let entries: Vec<ProfileEntry> = match serde_json::from_str(&raw) {
+        Ok(entries) => entries,
+        Err(err) => {
+            log.log(&format!("invalid II_GREETD_PROFILES_JSON: {}", err));
+            return HashMap::new();
+        }
+    };
+    let mut profiles = HashMap::new();
+    for entry in entries {
+        if entry.id.trim().is_empty() {
+            continue;
+        }
+        profiles.insert(entry.id.clone(), entry);
+    }
+    profiles
+}
+
+fn load_power_actions(log: &mut logging::Logger) -> HashSet<String> {
+    let raw = env::var("II_GREETD_POWER_ACTIONS_JSON").unwrap_or_default();
+    if raw.trim().is_empty() {
+        return HashSet::new();
+    }
+    let entries: Vec<String> = match serde_json::from_str(&raw) {
+        Ok(entries) => entries,
+        Err(err) => {
+            log.log(&format!("invalid II_GREETD_POWER_ACTIONS_JSON: {}", err));
+            return HashSet::new();
+        }
+    };
+    entries
+        .into_iter()
+        .map(|entry| entry.trim().to_ascii_lowercase())
+        .filter(|entry| !entry.is_empty())
+        .collect()
+}
+
+fn read_state(log: &mut logging::Logger) -> PersistedState {
+    let path = state_path();
+    let content = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(_) => return PersistedState::default(),
+    };
+    let mut state: PersistedState = match serde_json::from_str(&content) {
+        Ok(state) => state,
+        Err(err) => {
+            log.log(&format!("failed to parse state {}: {}", path.display(), err));
+            return PersistedState::default();
+        }
+    };
+    state.last_session_id = state.last_session_id.filter(|value| !value.trim().is_empty());
+    state.last_profile_id = state.last_profile_id.filter(|value| !value.trim().is_empty());
+    state.last_locale = state.last_locale.filter(|value| !value.trim().is_empty());
+    state
+}
+
+fn write_state(state: &PersistedState, log: &mut logging::Logger) {
     let path = state_path();
     if let Some(parent) = path.parent() {
         if let Err(err) = fs::create_dir_all(parent) {
@@ -161,10 +260,7 @@ fn persist_last_session(session_id: &str, log: &mut logging::Logger) {
             return;
         }
     }
-    let state = PersistedState {
-        last_session_id: session_id.to_string(),
-    };
-    match serde_json::to_vec(&state) {
+    match serde_json::to_vec(state) {
         Ok(payload) => {
             if let Err(err) = fs::write(&path, payload) {
                 log.log(&format!("failed to write state {}: {}", path.display(), err));
@@ -176,6 +272,59 @@ fn persist_last_session(session_id: &str, log: &mut logging::Logger) {
     }
 }
 
+fn persist_state_update(
+    session_id: Option<&str>,
+    profile_id: Option<&str>,
+    locale: Option<&str>,
+    log: &mut logging::Logger,
+) {
+    if session_id.is_none() && profile_id.is_none() && locale.is_none() {
+        return;
+    }
+    let mut state = read_state(log);
+    if let Some(session_id) = session_id.map(str::trim).filter(|value| !value.is_empty()) {
+        state.last_session_id = Some(session_id.to_string());
+    }
+    if let Some(profile_id) = profile_id.map(str::trim).filter(|value| !value.is_empty()) {
+        state.last_profile_id = Some(profile_id.to_string());
+    }
+    if let Some(locale) = locale.map(str::trim).filter(|value| !value.is_empty()) {
+        state.last_locale = Some(locale.to_string());
+    }
+    write_state(&state, log);
+}
+
+fn power_error_code(message: &str) -> &'static str {
+    let lowered = message.to_ascii_lowercase();
+    if lowered.contains("accessdenied")
+        || lowered.contains("notauthorized")
+        || lowered.contains("not authorized")
+        || lowered.contains("permission")
+        || lowered.contains("polkit")
+    {
+        "power_denied"
+    } else {
+        "power_error"
+    }
+}
+
+fn request_power_action(action: &str) -> std::result::Result<(), String> {
+    let conn = zbus::blocking::Connection::system().map_err(|err| err.to_string())?;
+    let proxy = zbus::blocking::Proxy::new(
+        &conn,
+        "org.freedesktop.login1",
+        "/org/freedesktop/login1",
+        "org.freedesktop.login1.Manager",
+    )
+    .map_err(|err| err.to_string())?;
+    match action {
+        "poweroff" => proxy.call("PowerOff", &(false)).map_err(|err| err.to_string()),
+        "reboot" => proxy.call("Reboot", &(false)).map_err(|err| err.to_string()),
+        "suspend" => proxy.call("Suspend", &(false)).map_err(|err| err.to_string()),
+        _ => Err(format!("unknown power action: {}", action)),
+    }
+}
+
 fn main() -> Result<()> {
     let stdin = io::stdin();
     let mut stdin_lock = stdin.lock();
@@ -183,6 +332,9 @@ fn main() -> Result<()> {
     let mut log = logging::Logger::new("backend");
 
     log.log("backend start");
+    let sessions = load_sessions(&mut log);
+    let profiles = load_profiles(&mut log);
+    let power_actions = load_power_actions(&mut log);
     send_response(
         &mut *stdout.borrow_mut(),
         protocol::BackendResponse::State { phase: "idle".into() },
@@ -218,6 +370,8 @@ fn main() -> Result<()> {
                 command,
                 env,
                 session_id,
+                profile_id,
+                locale,
             } => {
                 log.log(&format!("request: auth user={}", username));
                 send_response(
@@ -237,8 +391,62 @@ fn main() -> Result<()> {
                     )?;
                     continue;
                 }
-                let cmd = if command.is_empty() { default_command(&mut log) } else { command };
-                let env_vec = build_env(env);
+                let session_id = session_id.and_then(|value| {
+                    let trimmed = value.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    }
+                });
+                let profile_id = profile_id.and_then(|value| {
+                    let trimmed = value.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    }
+                });
+                let locale = locale.and_then(|value| {
+                    let trimmed = value.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    }
+                });
+                let mut effective_session_id = session_id.clone();
+                let profile = profile_id.as_ref().and_then(|id| profiles.get(id));
+                if effective_session_id.is_none() {
+                    if let Some(profile) = profile {
+                        let value = profile.session.trim();
+                        if !value.is_empty() {
+                            effective_session_id = Some(value.to_string());
+                        }
+                    }
+                }
+                let mut cmd = if !command.is_empty() {
+                    command
+                } else if let Some(id) = effective_session_id.as_ref() {
+                    sessions.get(id).cloned().unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                if cmd.is_empty() {
+                    cmd = default_command(&mut log);
+                }
+
+                let mut env_map = env;
+                if let Some(profile) = profile {
+                    for (key, value) in profile.env.iter() {
+                        env_map.insert(key.clone(), value.clone());
+                    }
+                }
+                if let Some(locale) = locale.as_ref() {
+                    env_map.insert("LANG".to_string(), locale.clone());
+                    env_map.insert("LC_ALL".to_string(), locale.clone());
+                }
+                let env_vec = build_env(env_map);
                 let mut prompt_id = 0u64;
                 let stdout_for_prompt = Rc::clone(&stdout);
                 let stdout_for_wait = Rc::clone(&stdout);
@@ -266,12 +474,22 @@ fn main() -> Result<()> {
                         protocol::BackendResponse::State { phase: "waiting".into() },
                     );
                 };
-                match greetd::authenticate_and_start(&username, &cmd, &env_vec, &mut log, &mut prompt_handler, &mut on_waiting) {
+                match greetd::authenticate_and_start(
+                    &username,
+                    &cmd,
+                    &env_vec,
+                    &mut log,
+                    &mut prompt_handler,
+                    &mut on_waiting,
+                ) {
                     Ok(()) => {
                         log.log("auth success; start_session ok");
-                        if let Some(session_id) = session_id.as_ref() {
-                            persist_last_session(session_id, &mut log);
-                        }
+                        persist_state_update(
+                            effective_session_id.as_deref(),
+                            profile_id.as_deref(),
+                            locale.as_deref(),
+                            &mut log,
+                        );
                         send_response(
                             &mut *stdout.borrow_mut(),
                             protocol::BackendResponse::State { phase: "success".into() },
@@ -320,12 +538,29 @@ fn main() -> Result<()> {
                 )?;
             }
             protocol::UiRequest::Power { action } => {
+                let action = action.trim().to_ascii_lowercase();
                 log.log(&format!("request: power {}", action));
-                send_error(
-                    &mut *stdout.borrow_mut(),
-                    "pam_error",
-                    format!("power action not implemented: {}", action),
-                )?;
+                if action.is_empty() {
+                    send_error(&mut *stdout.borrow_mut(), "power_error", "power action missing")?;
+                    continue;
+                }
+                if !power_actions.contains(&action) {
+                    send_error(
+                        &mut *stdout.borrow_mut(),
+                        "power_denied",
+                        format!("power action not allowed: {}", action),
+                    )?;
+                    continue;
+                }
+                match request_power_action(&action) {
+                    Ok(()) => {
+                        log.log(&format!("power action dispatched: {}", action));
+                    }
+                    Err(err) => {
+                        let code = power_error_code(&err);
+                        send_error(&mut *stdout.borrow_mut(), code, err)?;
+                    }
+                }
             }
         }
     }

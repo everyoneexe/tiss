@@ -13,6 +13,12 @@ pub struct Config {
     #[serde(default)]
     pub sessions: Vec<SessionEntry>,
     #[serde(default)]
+    pub profiles: Vec<Profile>,
+    #[serde(default)]
+    pub locales: Locales,
+    #[serde(default)]
+    pub power: Power,
+    #[serde(default)]
     pub logging: Logging,
     #[serde(default)]
     pub seat: Seat,
@@ -53,6 +59,28 @@ pub struct SessionEntry {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+pub struct Profile {
+    pub id: String,
+    pub name: String,
+    pub session: String,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct Locales {
+    pub default: Option<String>,
+    #[serde(default)]
+    pub available: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct Power {
+    #[serde(default)]
+    pub enabled: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Logging {
     pub dir: Option<PathBuf>,
     pub level: Option<String>,
@@ -78,6 +106,9 @@ impl Config {
             login: self.login.merge(other.login),
             session: self.session.merge(other.session),
             sessions: if other.sessions.is_empty() { self.sessions } else { other.sessions },
+            profiles: if other.profiles.is_empty() { self.profiles } else { other.profiles },
+            locales: self.locales.merge(other.locales),
+            power: self.power.merge(other.power),
             logging: self.logging.merge(other.logging),
             seat: self.seat.merge(other.seat),
             ui: self.ui.merge(other.ui),
@@ -121,6 +152,23 @@ impl Session {
             other.command
         };
         Session { command, env }
+    }
+}
+
+impl Locales {
+    fn merge(self, other: Locales) -> Locales {
+        Locales {
+            default: other.default.or(self.default),
+            available: if other.available.is_empty() { self.available } else { other.available },
+        }
+    }
+}
+
+impl Power {
+    fn merge(self, other: Power) -> Power {
+        Power {
+            enabled: if other.enabled.is_empty() { self.enabled } else { other.enabled },
+        }
     }
 }
 

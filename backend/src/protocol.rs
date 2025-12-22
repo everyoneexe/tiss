@@ -14,6 +14,10 @@ pub enum UiRequest {
         env: std::collections::HashMap<String, String>,
         #[serde(default)]
         session_id: Option<String>,
+        #[serde(default)]
+        profile_id: Option<String>,
+        #[serde(default)]
+        locale: Option<String>,
     },
     #[serde(rename = "prompt_response")]
     PromptResponse {

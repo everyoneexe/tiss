@@ -27,6 +27,8 @@ ApplicationWindow {
     property bool promptActive: promptId >= 0
     property bool promptNeedsInput: promptKind === "visible" || promptKind === "secret"
     property string lastSessionId: iiLastSessionId
+    property string lastProfileId: iiLastProfileId
+    property string lastLocale: iiLastLocale
 
     BackendProcess {
         id: backend
@@ -81,6 +83,14 @@ ApplicationWindow {
         }
         if (lastSessionId.length > 0) {
             backend.selectedSessionId = lastSessionId
+        }
+        if (lastProfileId.length > 0) {
+            backend.selectedProfileId = lastProfileId
+        }
+        if (lastLocale.length > 0) {
+            backend.selectedLocale = lastLocale
+        } else if (iiLocales && iiLocales.default) {
+            backend.selectedLocale = iiLocales.default
         }
         usernameField.forceActiveFocus()
     }

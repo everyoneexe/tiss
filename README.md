@@ -66,6 +66,11 @@ to `/usr/share/ii-greetd/config.toml.example`).
 - `II_GREETD_SESSION_ENV_JSON`: override session env as a JSON object.
 - `II_GREETD_SESSIONS_JSON`: discovered sessions list as JSON (for themes).
 - `II_GREETD_LAST_SESSION_ID`: last selected session id (for themes).
+- `II_GREETD_PROFILES_JSON`: profiles list as JSON (for themes).
+- `II_GREETD_LAST_PROFILE_ID`: last selected profile id (for themes).
+- `II_GREETD_LOCALES_JSON`: locale config as JSON (for themes).
+- `II_GREETD_LAST_LOCALE`: last selected locale (for themes).
+- `II_GREETD_POWER_ACTIONS_JSON`: enabled power actions as JSON (for themes).
 - `II_GREETD_QML_URI`: override QML module URI (defaults to `IIGreetd`).
 - `II_GREETD_QML_FILE`: absolute path to a QML file to load directly.
 - `II_GREETD_THEME_DIR`: directory containing a theme `Main.qml`.
@@ -121,6 +126,11 @@ following context properties:
 - `iiSessionEnv` (map)
 - `iiSessions` (list of session objects)
 - `iiLastSessionId` (string)
+- `iiProfiles` (list of profile objects)
+- `iiLastProfileId` (string)
+- `iiLocales` (map with `default` and `available`)
+- `iiLastLocale` (string)
+- `iiPowerActions` (list of strings)
 
 `iiSessions` entries include:
 
@@ -134,13 +144,19 @@ following context properties:
 
 - `promptReceived(id, kind, message, echo)`
 - `errorReceived(code, message)` where code is `auth_failed`, `account_locked`,
-  `password_expired`, `pam_error`, or `backend_crash`.
+  `password_expired`, `pam_error`, `power_denied`, `power_error`, or `backend_crash`.
 - `success()` / `backendCrashed(message)`
 
 `BackendProcess` properties:
 
 - `sessionCommand`, `sessionEnv`
 - `selectedSessionId` (optional; persisted on success)
+- `selectedProfileId` (optional; persisted on success)
+- `selectedLocale` (optional; persisted on success)
+
+`BackendProcess` methods:
+
+- `requestPower(action)` where action is `poweroff`, `reboot`, or `suspend`
 
 Minimal example:
 
@@ -164,6 +180,8 @@ ApplicationWindow {
         sessionCommand: iiSessionCommand
         sessionEnv: iiSessionEnv
         selectedSessionId: iiLastSessionId
+        selectedProfileId: iiLastProfileId
+        selectedLocale: iiLastLocale
         onPromptReceived: (id, kind, message, echo) => {
             promptId = id
             promptKind = kind

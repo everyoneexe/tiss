@@ -95,6 +95,68 @@ static QVariantList parseSessionsJson(const QString &raw) {
     return result;
 }
 
+static QVariantList parseProfilesJson(const QString &raw) {
+    QVariantList result;
+    if (raw.trimmed().isEmpty()) {
+        return result;
+    }
+    QJsonParseError err;
+    const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &err);
+    if (err.error != QJsonParseError::NoError || !doc.isArray()) {
+        qWarning() << "invalid II_GREETD_PROFILES_JSON";
+        return result;
+    }
+    const QJsonArray arr = doc.array();
+    for (const auto &value : arr) {
+        if (!value.isObject()) {
+            continue;
+        }
+        result << value.toObject().toVariantMap();
+    }
+    return result;
+}
+
+static QVariantMap parseLocalesJson(const QString &raw) {
+    QVariantMap result;
+    if (raw.trimmed().isEmpty()) {
+        return result;
+    }
+    QJsonParseError err;
+    const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        qWarning() << "invalid II_GREETD_LOCALES_JSON";
+        return result;
+    }
+    const QJsonObject obj = doc.object();
+    if (obj.contains("default") && obj.value("default").isString()) {
+        result.insert("default", obj.value("default").toString());
+    }
+    if (obj.contains("available") && obj.value("available").isArray()) {
+        result.insert("available", obj.value("available").toArray().toVariantList());
+    }
+    return result;
+}
+
+static QVariantList parsePowerActionsJson(const QString &raw) {
+    QVariantList result;
+    if (raw.trimmed().isEmpty()) {
+        return result;
+    }
+    QJsonParseError err;
+    const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &err);
+    if (err.error != QJsonParseError::NoError || !doc.isArray()) {
+        qWarning() << "invalid II_GREETD_POWER_ACTIONS_JSON";
+        return result;
+    }
+    const QJsonArray arr = doc.array();
+    for (const auto &value : arr) {
+        if (value.isString()) {
+            result << value.toString();
+        }
+    }
+    return result;
+}
+
 static void ensureCacheEnv() {
     if (qEnvironmentVariableIsEmpty("QML_DISABLE_DISK_CACHE")) {
         qputenv("QML_DISABLE_DISK_CACHE", "1");
@@ -416,6 +478,11 @@ int main(int argc, char *argv[]) {
     const QVariantMap sessionEnv = parseSessionEnvJson(qEnvironmentVariable("II_GREETD_SESSION_ENV_JSON"));
     const QVariantList sessions = parseSessionsJson(qEnvironmentVariable("II_GREETD_SESSIONS_JSON"));
     const QString lastSessionId = qEnvironmentVariable("II_GREETD_LAST_SESSION_ID");
+    const QVariantList profiles = parseProfilesJson(qEnvironmentVariable("II_GREETD_PROFILES_JSON"));
+    const QVariantMap locales = parseLocalesJson(qEnvironmentVariable("II_GREETD_LOCALES_JSON"));
+    const QVariantList powerActions = parsePowerActionsJson(qEnvironmentVariable("II_GREETD_POWER_ACTIONS_JSON"));
+    const QString lastProfileId = qEnvironmentVariable("II_GREETD_LAST_PROFILE_ID");
+    const QString lastLocale = qEnvironmentVariable("II_GREETD_LAST_LOCALE");
     engine.rootContext()->setContextProperty("iiDefaultUser", defaultUser);
     engine.rootContext()->setContextProperty("iiLockUser", lockUser);
     engine.rootContext()->setContextProperty("iiShowPasswordToggle", showPasswordToggle);
@@ -423,6 +490,11 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("iiSessionEnv", sessionEnv);
     engine.rootContext()->setContextProperty("iiSessions", sessions);
     engine.rootContext()->setContextProperty("iiLastSessionId", lastSessionId);
+    engine.rootContext()->setContextProperty("iiProfiles", profiles);
+    engine.rootContext()->setContextProperty("iiLocales", locales);
+    engine.rootContext()->setContextProperty("iiPowerActions", powerActions);
+    engine.rootContext()->setContextProperty("iiLastProfileId", lastProfileId);
+    engine.rootContext()->setContextProperty("iiLastLocale", lastLocale);
     const bool qmlUriExplicit = !qEnvironmentVariableIsEmpty("II_GREETD_QML_URI");
     QString qmlUri = qEnvironmentVariable("II_GREETD_QML_URI");
     if (qmlUri.isEmpty()) {
