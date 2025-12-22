@@ -1,0 +1,59 @@
+# ii-greetd config example
+# Load order (last wins):
+#   /etc/ii-greetd/config.toml
+#   ~/.config/ii-greetd/config.toml
+# Environment variables override both.
+
+[paths]
+# Absolute path to the backend binary.
+backend = "/usr/lib/ii-greetd/ii-greetd-backend"
+
+# Absolute path to the QML entry point for your theme.
+# Leave unset to use theme_dir/theme instead.
+# qml_file = "/usr/share/ii-greetd/qml/Main.qml"
+
+# Optional theme directory (contains Main.qml). Ignored when qml_file is set.
+theme_dir = "/usr/share/ii-greetd/themes/lockscreen-vibe"
+
+# Optional theme name (searched in standard theme directories).
+theme = "lockscreen-vibe"
+
+# Optional QML module URI fallback (when no qml_file is set).
+qml_uri = "IIGreetd"
+
+[login]
+# Prefill username field.
+default_user = "YOUR_USER"
+
+# Hide username input and force default_user.
+lock_user = true
+
+[session]
+# Command to start after auth (array form allows args).
+command = ["niri"]
+
+# Environment variables to pass into the session.
+[session.env]
+XDG_SESSION_TYPE = "wayland"
+XDG_SESSION_CLASS = "user"
+XDG_CURRENT_DESKTOP = "niri"
+XDG_SESSION_DESKTOP = "niri"
+
+[logging]
+# Directory for UI/backend logs.
+dir = "/tmp/ii-greetd-logs"
+
+# Log level: "debug", "info", "warn", "error".
+level = "info"
+
+[seat]
+# Seat backend: "logind" or "seatd".
+backend = "logind"
+
+# Optional overrides for launcher.
+cage_bin = "/usr/bin/cage"
+cage_args = ["-s"]
+
+[ui]
+# Toggle visibility option for the password field.
+show_password_toggle = true

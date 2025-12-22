@@ -8,12 +8,21 @@ pub enum UiRequest {
     #[serde(rename = "auth")]
     Auth {
         username: String,
-        password: String,
         #[serde(default)]
         command: Vec<String>,
         #[serde(default)]
         env: std::collections::HashMap<String, String>,
+        #[serde(default)]
+        session_id: Option<String>,
     },
+    #[serde(rename = "prompt_response")]
+    PromptResponse {
+        id: u64,
+        #[serde(default)]
+        response: Option<String>,
+    },
+    #[serde(rename = "cancel")]
+    Cancel,
     #[serde(rename = "start")]
     Start { command: Vec<String>, #[serde(default)] env: std::collections::HashMap<String, String> },
     #[serde(rename = "power")]
@@ -25,8 +34,15 @@ pub enum UiRequest {
 pub enum BackendResponse {
     #[serde(rename = "state")]
     State { phase: String },
+    #[serde(rename = "prompt")]
+    Prompt {
+        id: u64,
+        kind: String,
+        message: String,
+        echo: bool,
+    },
     #[serde(rename = "error")]
-    Error { message: String },
+    Error { code: String, message: String },
     #[serde(rename = "success")]
     Success,
 }

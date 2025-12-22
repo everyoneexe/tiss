@@ -55,7 +55,7 @@ Basit ve denetlenebilir bir **JSON Lines** protokolü (satır başına 1 JSON) �
 - `{ "type": "power", "action": "reboot"|"poweroff" }` (opsiyonel)
 
 ### Backend -> UI
-- `{ "type": "state", "phase": "idle"|"authenticating"|"failed"|"starting" }`
+- `{ "type": "state", "phase": "idle"|"auth"|"waiting"|"error"|"success" }`
 - `{ "type": "error", "message": "…" }`
 - `{ "type": "success" }`
 

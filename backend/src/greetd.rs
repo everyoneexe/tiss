@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -28,16 +28,81 @@ enum Response {
     },
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Copy, Clone)]
 #[serde(rename_all = "snake_case")]
-enum AuthMessageType {
+pub enum AuthMessageType {
     Visible,
     Secret,
     Info,
     Error,
 }
 
-fn write_request(stream: &mut UnixStream, req: &Request) -> Result<()> {
+#[derive(Debug, Clone, Copy)]
+pub enum AuthErrorCode {
+    AuthFailed,
+    AccountLocked,
+    PasswordExpired,
+    PamError,
+}
+
+impl AuthErrorCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AuthErrorCode::AuthFailed => "auth_failed",
+            AuthErrorCode::AccountLocked => "account_locked",
+            AuthErrorCode::PasswordExpired => "password_expired",
+            AuthErrorCode::PamError => "pam_error",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct AuthError {
+    code: AuthErrorCode,
+    message: String,
+}
+
+impl AuthError {
+    fn auth_failure(kind: AuthFailureKind, detail: &str) -> Self {
+        AuthError {
+            code: kind.code(),
+            message: format_auth_error(kind, detail),
+        }
+    }
+
+    pub fn pam_error(message: impl Into<String>) -> Self {
+        AuthError {
+            code: AuthErrorCode::PamError,
+            message: message.into(),
+        }
+    }
+
+    pub fn code(&self) -> AuthErrorCode {
+        self.code
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl std::fmt::Display for AuthError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for AuthError {}
+
+impl From<anyhow::Error> for AuthError {
+    fn from(err: anyhow::Error) -> Self {
+        AuthError::pam_error(err.to_string())
+    }
+}
+
+pub type AuthResult<T> = std::result::Result<T, AuthError>;
+
+fn write_request(stream: &mut UnixStream, req: &Request) -> anyhow::Result<()> {
     let payload = serde_json::to_vec(req).context("serialize greetd request")?;
     let len = u32::try_from(payload.len()).context("payload too large")?;
     stream
@@ -50,7 +115,7 @@ fn write_request(stream: &mut UnixStream, req: &Request) -> Result<()> {
     Ok(())
 }
 
-fn read_response(stream: &mut UnixStream) -> Result<Response> {
+fn read_response(stream: &mut UnixStream) -> anyhow::Result<Response> {
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).context("read greetd length")?;
     let len = u32::from_ne_bytes(len_buf) as usize;
@@ -67,11 +132,12 @@ fn cancel_session(stream: &mut UnixStream) {
 
 pub fn authenticate_and_start(
     username: &str,
-    password: &str,
     command: &[String],
     env: &[String],
     log: &mut Logger,
-) -> Result<()> {
+    mut prompt: impl FnMut(AuthMessageType, &str) -> AuthResult<Option<String>>,
+    on_waiting: &mut dyn FnMut(),
+) -> AuthResult<()> {
     let sock = std::env::var("GREETD_SOCK").context("GREETD_SOCK not set")?;
     let mut stream = UnixStream::connect(sock).context("connect greetd socket")?;
 
@@ -84,7 +150,6 @@ pub fn authenticate_and_start(
     )?;
 
     let mut last_info: Option<String> = None;
-    let password = password.to_string();
 
     loop {
         match read_response(&mut stream)? {
@@ -101,34 +166,37 @@ pub fn authenticate_and_start(
                         log.log(&format!("pam message: {:?} (empty)", auth_message_type));
                     }
                     if !auth_message.trim().is_empty() {
-                        last_info = Some(auth_message);
+                        last_info = Some(auth_message.clone());
                     }
+                    let response = match prompt(auth_message_type, msg) {
+                        Ok(resp) => resp,
+                        Err(err) => {
+                            cancel_session(&mut stream);
+                            return Err(err);
+                        }
+                    };
                     write_request(
                         &mut stream,
-                        &Request::PostAuthMessageResponse { response: None },
+                        &Request::PostAuthMessageResponse { response },
                     )?;
                 }
                 AuthMessageType::Visible | AuthMessageType::Secret => {
-                    let prompt = auth_message.trim().to_lowercase();
-                    if !auth_message.trim().is_empty() {
-                        log.log(&format!("pam prompt: {:?}: {}", auth_message_type, auth_message.trim()));
+                    let prompt_text = auth_message.trim();
+                    if !prompt_text.is_empty() {
+                        log.log(&format!("pam prompt: {:?}: {}", auth_message_type, prompt_text));
                     } else {
                         log.log(&format!("pam prompt: {:?} (empty)", auth_message_type));
                     }
-                    if password.is_empty() {
-                        cancel_session(&mut stream);
-                        return Err(anyhow!("empty password"));
-                    }
-                    let response = if auth_message_type == AuthMessageType::Visible {
-                        if prompt.contains("user") || prompt.contains("login") || prompt.contains("name") {
-                            username.to_string()
-                        } else if prompt.contains("pass") {
-                            password.clone()
-                        } else {
-                            username.to_string()
+                    let response = match prompt(auth_message_type, prompt_text) {
+                        Ok(Some(resp)) => resp,
+                        Ok(None) => {
+                            cancel_session(&mut stream);
+                            return Err(AuthError::pam_error("prompt response missing"));
                         }
-                    } else {
-                        password.clone()
+                        Err(err) => {
+                            cancel_session(&mut stream);
+                            return Err(err);
+                        }
                     };
                     write_request(
                         &mut stream,
@@ -145,14 +213,22 @@ pub fn authenticate_and_start(
                 log.log(&format!("greetd error: {} {}", error_type, description));
                 cancel_session(&mut stream);
                 let detail = last_info.unwrap_or_default();
-                if detail.is_empty() {
-                    return Err(anyhow!("{}: {}", error_type, description));
+                if error_type == "auth_error" {
+                    let kind = classify_auth_failure(&description, &detail);
+                    return Err(AuthError::auth_failure(kind, &detail));
                 }
-                return Err(anyhow!("{}: {} ({})", error_type, description, detail));
+                let message = if detail.is_empty() {
+                    format!("{}: {}", error_type, description)
+                } else {
+                    format!("{}: {} ({})", error_type, description, detail)
+                };
+                return Err(AuthError::pam_error(message));
             }
         }
     }
 
+    log.log("start_session");
+    on_waiting();
     write_request(
         &mut stream,
         &Request::StartSession {
@@ -166,10 +242,68 @@ pub fn authenticate_and_start(
         Response::Error {
             error_type,
             description,
-        } => Err(anyhow!("{}: {}", error_type, description)),
-        Response::AuthMessage { auth_message, .. } => Err(anyhow!(
+        } => Err(AuthError::pam_error(format!("{}: {}", error_type, description))),
+        Response::AuthMessage { auth_message, .. } => Err(AuthError::pam_error(format!(
             "unexpected auth message during start_session: {}",
             auth_message
-        )),
+        ))),
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum AuthFailureKind {
+    AuthErr,
+    AccountLocked,
+    Expired,
+}
+
+impl AuthFailureKind {
+    fn code(self) -> AuthErrorCode {
+        match self {
+            AuthFailureKind::AuthErr => AuthErrorCode::AuthFailed,
+            AuthFailureKind::AccountLocked => AuthErrorCode::AccountLocked,
+            AuthFailureKind::Expired => AuthErrorCode::PasswordExpired,
+        }
+    }
+}
+
+fn classify_auth_failure(description: &str, detail: &str) -> AuthFailureKind {
+    let mut haystack = String::new();
+    haystack.push_str(description);
+    haystack.push(' ');
+    haystack.push_str(detail);
+    let haystack = haystack.to_lowercase();
+
+    if haystack.contains("acct_expired")
+        || haystack.contains("authtok_expired")
+        || haystack.contains("new_authtok_reqd")
+        || haystack.contains("expired")
+    {
+        return AuthFailureKind::Expired;
+    }
+
+    if haystack.contains("account locked")
+        || haystack.contains("locked")
+        || haystack.contains("maxtries")
+        || haystack.contains("perm_denied")
+    {
+        return AuthFailureKind::AccountLocked;
+    }
+
+    AuthFailureKind::AuthErr
+}
+
+fn format_auth_error(kind: AuthFailureKind, detail: &str) -> String {
+    let suffix = detail.trim();
+    let message = match kind {
+        AuthFailureKind::AuthErr => "Authentication failed",
+        AuthFailureKind::AccountLocked => "Account locked or disabled",
+        AuthFailureKind::Expired => "Account or password expired",
+    };
+
+    if suffix.is_empty() {
+        message.to_string()
+    } else {
+        format!("{} ({})", message, suffix)
     }
 }
