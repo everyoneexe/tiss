@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+local_bin="${root_dir}/launcher/target/release/ii-greetd-launcher"
+
+if [[ -x "${local_bin}" ]]; then
+  exec "${local_bin}" "$@"
+fi
+
+found="$(command -v ii-greetd-launcher 2>/dev/null || true)"
+if [[ -n "${found}" ]]; then
+  self_path="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+  found_path="$(readlink -f "${found}" 2>/dev/null || echo "${found}")"
+  if [[ "${found_path}" != "${self_path}" ]]; then
+    exec "${found_path}" "$@"
+  fi
+fi
+
+echo "ii-greetd-launcher: build ./launcher (cargo build --release) or install the launcher binary" >&2
+exit 1

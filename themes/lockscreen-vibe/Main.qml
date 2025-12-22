@@ -10,16 +10,15 @@ ApplicationWindow {
     width: outputReady ? Screen.width : 1280
     height: outputReady ? Screen.height : 720
     visible: outputReady
-    title: "ii-greetd"
-    color: "#0e0f12"
+    title: "liminal-greetd"
+    color: "#0b0c10"
 
     property string defaultUser: iiDefaultUser
     property bool lockUser: iiLockUser
+    property bool showPasswordToggle: iiShowPasswordToggle
     property bool busy: backend.busy
     property bool hasUser: (lockUser ? defaultUser.length > 0 : usernameField.text.length > 0)
     property bool showPassword: false
-    property bool showPasswordToggle: iiShowPasswordToggle
-    property string lastSessionId: iiLastSessionId
     property int promptId: -1
     property string promptKind: ""
     property string promptMessage: ""
@@ -27,6 +26,7 @@ ApplicationWindow {
     property bool promptEcho: true
     property bool promptActive: promptId >= 0
     property bool promptNeedsInput: promptKind === "visible" || promptKind === "secret"
+    property string lastSessionId: iiLastSessionId
 
     BackendProcess {
         id: backend
@@ -136,26 +136,38 @@ ApplicationWindow {
         interval: 1000
         running: true
         repeat: true
-        onTriggered: clockText.text = Qt.formatDateTime(new Date(), "hh:mm")
+        onTriggered: {
+            clockText.text = Qt.formatDateTime(new Date(), "hh:mm")
+            dateText.text = Qt.formatDateTime(new Date(), "ddd, MMM d")
+        }
     }
 
     Rectangle {
         anchors.fill: parent
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#0e0f12" }
-            GradientStop { position: 1.0; color: "#1b1f2a" }
+            GradientStop { position: 0.0; color: "#0b0c10" }
+            GradientStop { position: 0.55; color: "#10131a" }
+            GradientStop { position: 1.0; color: "#1a1e28" }
         }
+    }
+
+    Rectangle {
+        width: parent.width
+        height: parent.height
+        color: "#0a0f17"
+        opacity: 0.35
     }
 
     ColumnLayout {
         anchors.centerIn: parent
-        spacing: 16
+        spacing: 18
 
         Text {
             id: clockText
             text: Qt.formatDateTime(new Date(), "hh:mm")
-            color: "#e6e6e6"
-            font.pixelSize: 64
+            color: "#f2f4f8"
+            font.pixelSize: 72
+            font.letterSpacing: 2
             horizontalAlignment: Text.AlignHCenter
             Layout.alignment: Qt.AlignHCenter
         }
@@ -170,82 +182,96 @@ ApplicationWindow {
 
         Rectangle {
             width: 420
-            height: 1
-            color: "#2a2f3a"
+            height: 2
+            radius: 1
+            color: "#2a3040"
             Layout.alignment: Qt.AlignHCenter
         }
 
-        TextField {
-            id: usernameField
-            placeholderText: "Username"
-            Layout.preferredWidth: 360
+        Rectangle {
+            width: 440
+            radius: 18
+            color: "#121620"
+            border.color: "#232a3a"
+            border.width: 1
             Layout.alignment: Qt.AlignHCenter
-            readOnly: lockUser
-            visible: !lockUser
-            enabled: !busy
-        }
+            Layout.preferredWidth: 440
 
-        Text {
-            id: promptLabel
-            text: root.promptMessage
-            visible: root.promptActive && root.promptMessage.length > 0
-            color: "#c2c8d2"
-            font.pixelSize: 14
-            horizontalAlignment: Text.AlignHCenter
-            Layout.alignment: Qt.AlignHCenter
-            wrapMode: Text.WordWrap
-            Layout.preferredWidth: 360
-        }
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 20
+                spacing: 12
 
-        TextField {
-            id: promptField
-            placeholderText: root.promptKind === "secret" ? "Password" : "Response"
-            echoMode: (root.promptKind === "secret" && !root.showPassword) ? TextInput.Password : TextInput.Normal
-            Layout.preferredWidth: 360
-            Layout.alignment: Qt.AlignHCenter
-            enabled: !busy
-            visible: root.promptActive && root.promptNeedsInput
-            onAccepted: root.submitPrompt()
-        }
+                TextField {
+                    id: usernameField
+                    placeholderText: "Username"
+                    Layout.preferredWidth: 360
+                    readOnly: lockUser
+                    visible: !lockUser
+                    enabled: !busy
+                }
 
-        CheckBox {
-            id: showPasswordCheck
-            text: "Show password"
-            checked: root.showPassword
-            enabled: !busy
-            visible: root.showPasswordToggle && root.promptKind === "secret"
-            Layout.alignment: Qt.AlignHCenter
-            onToggled: root.showPassword = checked
-        }
+                Text {
+                    id: promptLabel
+                    text: root.promptMessage
+                    visible: root.promptActive && root.promptMessage.length > 0
+                    color: "#c2c8d2"
+                    font.pixelSize: 14
+                    horizontalAlignment: Text.AlignHCenter
+                    Layout.alignment: Qt.AlignHCenter
+                    wrapMode: Text.WordWrap
+                    Layout.preferredWidth: 360
+                }
 
-        Button {
-            id: loginButton
-            text: busy ? "Working..." : "Continue"
-            enabled: hasUser && !busy
-            visible: !root.promptActive
-            Layout.preferredWidth: 200
-            Layout.alignment: Qt.AlignHCenter
-            onClicked: {
-                root.doLogin()
+                TextField {
+                    id: promptField
+                    placeholderText: root.promptKind === "secret" ? "Password" : "Response"
+                    echoMode: (root.promptKind === "secret" && !root.showPassword) ? TextInput.Password : TextInput.Normal
+                    Layout.preferredWidth: 360
+                    enabled: !busy
+                    visible: root.promptActive && root.promptNeedsInput
+                    onAccepted: root.submitPrompt()
+                }
+
+                CheckBox {
+                    id: showPasswordCheck
+                    text: "Show password"
+                    checked: root.showPassword
+                    enabled: !busy
+                    visible: root.showPasswordToggle && root.promptKind === "secret"
+                    onToggled: root.showPassword = checked
+                }
+
+                Button {
+                    id: loginButton
+                    text: busy ? "Working..." : "Continue"
+                    enabled: hasUser && !busy
+                    visible: !root.promptActive
+                    Layout.preferredWidth: 200
+                    Layout.alignment: Qt.AlignHCenter
+                    onClicked: root.doLogin()
+                }
+
+                Button {
+                    id: promptButton
+                    text: root.promptNeedsInput ? "Submit" : "Continue"
+                    enabled: !busy && (!root.promptNeedsInput || promptField.text.length > 0)
+                    visible: root.promptActive
+                    Layout.preferredWidth: 200
+                    Layout.alignment: Qt.AlignHCenter
+                    onClicked: root.submitPrompt()
+                }
+
+                Text {
+                    id: statusText
+                    text: ""
+                    color: "#d97272"
+                    font.pixelSize: 14
+                    Layout.alignment: Qt.AlignHCenter
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                }
             }
-        }
-
-        Button {
-            id: promptButton
-            text: root.promptNeedsInput ? "Submit" : "Continue"
-            enabled: !busy && (!root.promptNeedsInput || promptField.text.length > 0)
-            visible: root.promptActive
-            Layout.preferredWidth: 200
-            Layout.alignment: Qt.AlignHCenter
-            onClicked: root.submitPrompt()
-        }
-
-        Text {
-            id: statusText
-            text: ""
-            color: "#d97272"
-            font.pixelSize: 14
-            Layout.alignment: Qt.AlignHCenter
         }
     }
 }

@@ -6,6 +6,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QStandardPaths>
 
 BackendProcess::BackendProcess(QObject *parent)
@@ -33,12 +34,50 @@ void BackendProcess::startBackend() {
     m_proc.start();
 }
 
-void BackendProcess::authenticate(const QString &username, const QString &password) {
+void BackendProcess::authenticate(const QString &username) {
     m_allowExit = false;
     QJsonObject obj;
     obj.insert("type", "auth");
     obj.insert("username", username);
-    obj.insert("password", password);
+    if (!m_selectedSessionId.isEmpty()) {
+        obj.insert("session_id", m_selectedSessionId);
+    }
+    if (!m_sessionCommand.isEmpty()) {
+        QJsonArray cmd;
+        for (const auto &part : m_sessionCommand) {
+            cmd.append(part);
+        }
+        obj.insert("command", cmd);
+    }
+    if (!m_sessionEnv.isEmpty()) {
+        QJsonObject envObj;
+        for (auto it = m_sessionEnv.constBegin(); it != m_sessionEnv.constEnd(); ++it) {
+            envObj.insert(it.key(), it.value().toString());
+        }
+        obj.insert("env", envObj);
+    }
+    sendJson(obj);
+}
+
+void BackendProcess::respondPrompt(int id, const QString &response) {
+    QJsonObject obj;
+    obj.insert("type", "prompt_response");
+    obj.insert("id", id);
+    obj.insert("response", response);
+    sendJson(obj);
+}
+
+void BackendProcess::ackPrompt(int id) {
+    QJsonObject obj;
+    obj.insert("type", "prompt_response");
+    obj.insert("id", id);
+    obj.insert("response", QJsonValue::Null);
+    sendJson(obj);
+}
+
+void BackendProcess::cancelAuth() {
+    QJsonObject obj;
+    obj.insert("type", "cancel");
     sendJson(obj);
 }
 
@@ -51,7 +90,38 @@ void BackendProcess::startSession(const QStringList &command) {
         cmd.append(part);
     }
     obj.insert("command", cmd);
+    if (!m_sessionEnv.isEmpty()) {
+        QJsonObject envObj;
+        for (auto it = m_sessionEnv.constBegin(); it != m_sessionEnv.constEnd(); ++it) {
+            envObj.insert(it.key(), it.value().toString());
+        }
+        obj.insert("env", envObj);
+    }
     sendJson(obj);
+}
+
+void BackendProcess::setSessionCommand(const QStringList &command) {
+    if (m_sessionCommand == command) {
+        return;
+    }
+    m_sessionCommand = command;
+    emit sessionConfigChanged();
+}
+
+void BackendProcess::setSessionEnv(const QVariantMap &env) {
+    if (m_sessionEnv == env) {
+        return;
+    }
+    m_sessionEnv = env;
+    emit sessionConfigChanged();
+}
+
+void BackendProcess::setSelectedSessionId(const QString &sessionId) {
+    if (m_selectedSessionId == sessionId) {
+        return;
+    }
+    m_selectedSessionId = sessionId;
+    emit sessionConfigChanged();
 }
 
 void BackendProcess::handleStdout() {
@@ -67,11 +137,19 @@ void BackendProcess::handleStdout() {
         if (type == "state") {
             m_phase = obj.value("phase").toString();
             emit phaseChanged();
+        } else if (type == "prompt") {
+            emit promptReceived(
+                obj.value("id").toInt(),
+                obj.value("kind").toString(),
+                obj.value("message").toString(),
+                obj.value("echo").toBool());
         } else if (type == "error") {
-            emit errorReceived(obj.value("message").toString());
+            const QString code = obj.value("code").toString();
+            emit errorReceived(code.isEmpty() ? QStringLiteral("pam_error") : code,
+                               obj.value("message").toString());
         } else if (type == "success") {
             m_allowExit = true;
-            m_phase = "starting";
+            m_phase = "success";
             emit phaseChanged();
             emit success();
         }
@@ -85,6 +163,7 @@ void BackendProcess::handleFinished(int exitCode, QProcess::ExitStatus status) {
     const QString msg = QString("backend exited: code=%1 status=%2")
                             .arg(exitCode)
                             .arg(status == QProcess::NormalExit ? "normal" : "crash");
+    emit errorReceived(QStringLiteral("backend_crash"), msg);
     emit backendCrashed(msg);
 }
 
@@ -113,7 +192,9 @@ void BackendProcess::handleError(QProcess::ProcessError error) {
         kind = "unknown-error";
         break;
     }
-    emit backendCrashed(QString("backend error: %1 (%2)").arg(kind, m_proc.errorString()));
+    const QString msg = QString("backend error: %1 (%2)").arg(kind, m_proc.errorString());
+    emit errorReceived(QStringLiteral("backend_crash"), msg);
+    emit backendCrashed(msg);
 }
 
 QString BackendProcess::resolveBackendPath() const {

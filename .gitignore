@@ -1,5 +1,7 @@
 # Rust
 /backend/target/
+/config/target/
+/launcher/target/
 
 # Qt / CMake
 /ui/build/
