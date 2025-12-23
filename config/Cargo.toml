@@ -1,5 +1,5 @@
 [package]
-name = "ii-greetd-config"
+name = "tiss-greetd-config"
 version = "0.1.0"
 edition = "2021"
 

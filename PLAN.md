@@ -1,8 +1,8 @@
-# ii-greetd-qml — DEV Plan
+# tiss-greetd-qml — DEV Plan
 
-Amaç: `greetd` için **grafik (Wayland) greeter** yazmak ve UI’yi **Qt6/QML** ile kurmak. Böylece SDDM yerine `greetd` kullanırken “ii-niri lockscreen hissi” veren bir giriş ekranı elde edilir.
+Amaç: `greetd` için **grafik (Wayland) greeter** yazmak ve UI’yi **Qt6/QML** ile kurmak. Böylece SDDM yerine `greetd` kullanırken “tiss-login lockscreen hissi” veren bir giriş ekranı elde edilir.
 
-> Not: ii-niri içindeki mevcut lockscreen QML’i (Quickshell) “greetd greeter” olarak direkt çalışmaz; çünkü greeter farklı bir yaşam döngüsünde (TTY/seat) çalışır ve **greetd IPC** üzerinden kimlik doğrulama + session başlatma yapmalıdır. Bu yüzden ayrı bir uygulama/protokol yazıyoruz.
+> Not: tiss-login içindeki mevcut lockscreen QML’i (Quickshell) “greetd greeter” olarak direkt çalışmaz; çünkü greeter farklı bir yaşam döngüsünde (TTY/seat) çalışır ve **greetd IPC** üzerinden kimlik doğrulama + session başlatma yapmalıdır. Bu yüzden ayrı bir uygulama/protokol yazıyoruz.
 
 ---
 
@@ -12,12 +12,12 @@ Amaç: `greetd` için **grafik (Wayland) greeter** yazmak ve UI’yi **Qt6/QML**
 - `greetd` ile uyumlu greeter: kullanıcı adı + parola al, doğrula, session başlat.
 - UI: Qt6 + QML (Wayland).
 - Varsayılan session: `niri` (opsiyonel olarak seçim).
-- “ii-niri lockscreen”e benzer görünüm (renk/typography/blur/clock vs.).
+- “tiss-login lockscreen”e benzer görünüm (renk/typography/blur/clock vs.).
 - Güvenlik: parola hiçbir log’a düşmez, bellek temizliği, başarısız denemelerde geri bildirim.
 
 ### Non-goals
 - SDDM’nin tüm özellikleri (çoklu kullanıcı listeleri, çoklu ekran, network login vb.) ilk aşamada yok.
-- Mevcut ii-niri lockscreen’inin Quickshell bağımlılıklarını olduğu gibi taşımak yok; gerekirse UI parçası yeniden yazılır/ayrıştırılır.
+- Mevcut tiss-login lockscreen’inin Quickshell bağımlılıklarını olduğu gibi taşımak yok; gerekirse UI parçası yeniden yazılır/ayrıştırılır.
 
 ---
 
@@ -28,19 +28,19 @@ Amaç: `greetd` için **grafik (Wayland) greeter** yazmak ve UI’yi **Qt6/QML**
 - QML UI ise Qt tarafında en rahat.
 
 ### Önerilen mimari (2 proses)
-1) **Backend (Rust)**: `ii-greetd-backend`
+1) **Backend (Rust)**: `tiss-greetd-backend`
    - `GREETD_SOCK` üzerinden greetd’ye bağlanır.
    - UI’den gelen istekleri alır (JSON üzerinden stdin/stdout veya Unix socket).
    - greetd’ye `create_session` / `post_auth_message` / `start_session` akışını yürütür.
 
-2) **UI (Qt6/QML)**: `ii-greetd-ui`
+2) **UI (Qt6/QML)**: `tiss-greetd-ui`
    - Sadece arayüz + input + state.
    - Backend ile konuşur (JSON message protocol).
 
 ### UI’yi Wayland’da nasıl çalıştıracağız?
 - Greeter TTY’de çalışır; Qt6 Wayland client olması için bir compositor gerekir.
 - Pratik çözüm: **`cage`** (kiosk compositor) ile UI’yi çalıştırmak:
-  - greetd `default_session.command`: `cage -s -- ii-greetd-backend --spawn-ui`
+  - greetd `default_session.command`: `cage -s -- tiss-greetd-backend --spawn-ui`
 
 ---
 
@@ -85,8 +85,8 @@ Not: Bu kısım greetd’nin mevcut API’sine göre uygulanacak; en doğru refe
 - Hata mesajı / “Caps lock açık” gibi ipuçları (opsiyonel)
 - “Restart/Poweroff” (opsiyonel, yetki modeline dikkat)
 
-### ii-niri lockscreen ile görsel yakınlık
-- Renkler: mevcut ii-niri tema değişkenlerini kopyala/uyarla.
+### tiss-login lockscreen ile görsel yakınlık
+- Renkler: mevcut tiss-login tema değişkenlerini kopyala/uyarla.
 - Fontlar: Oxanium vb.
 - Animasyonlar: minimal.
 
@@ -97,7 +97,7 @@ Teknik not: `modules/lock/LockSurface.qml` doğrudan import edilemeyebilir (Quic
 ## 5) Repo/Proje Yapısı
 
 ```
-ii-greetd-qml/
+tiss-greetd-qml/
   backend/          # Rust crate (greetd_ipc)
   ui/               # Qt6/QML app
   protocol/         # JSON schema, örnek message’lar
@@ -131,7 +131,7 @@ Build sistemi önerisi:
 - Çoklu monitor davranışı not edilir.
 
 ### M5 — Görsel entegrasyon (3–7 gün)
-- ii-niri’ye benzer tema, font, background.
+- tiss-login’e benzer tema, font, background.
 - (Opsiyonel) blur; performans testleri.
 
 ### M6 — Arch packaging (1–2 gün)
@@ -152,7 +152,7 @@ Build sistemi önerisi:
 ## 8) Arch Konfig Örneği (hedef)
 
 `/etc/greetd/config.toml` (örnek):
-- `default_session.command = "cage -s -- ii-greetd-backend --spawn-ui"`
+- `default_session.command = "cage -s -- tiss-greetd-backend --spawn-ui"`
 - `default_session.user = "greeter"`
 
 Ek bağımlılıklar:

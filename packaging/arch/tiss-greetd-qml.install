@@ -1,0 +1,24 @@
+post_install() {
+  cat <<'EOF'
+tiss-greetd-qml installed.
+
+Example greetd config:
+  /usr/share/tiss-greetd/greetd-config.toml.example
+
+Example tiss-greetd config:
+  /usr/share/tiss-greetd/config.toml.example
+
+Typical command (launcher handles defaults):
+  /usr/bin/env TISS_GREETD_DEFAULT_USER=YOUR_USER TISS_GREETD_LOCK_USER=1 \\
+    TISS_GREETD_SESSION_JSON='[\"niri\"]' \\
+    /usr/bin/tiss-greetd-launcher
+
+Logs:
+  /tmp/tiss-greetd-<uid>/tiss-greetd-ui.log
+  /tmp/tiss-greetd-<uid>/tiss-greetd-backend.log
+EOF
+}
+
+post_upgrade() {
+  post_install
+}

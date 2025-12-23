@@ -1,4 +1,4 @@
-use ii_greetd_config::Config;
+use tiss_greetd_config::Config;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
@@ -9,24 +9,26 @@ use std::os::unix::process::CommandExt;
 
 fn main() {
     if let Err(err) = run() {
-        eprintln!("ii-greetd-launcher: {}", err);
+        eprintln!("tiss-greetd-launcher: {}", err);
         std::process::exit(1);
     }
 }
 
 fn run() -> Result<(), String> {
     let config = load_config();
-    let session_json_explicit = !env_missing("II_GREETD_SESSION_JSON");
+    let session_json_explicit = !env_missing("TISS_GREETD_SESSION_JSON");
     apply_config_env(&config)?;
     let state = load_state();
     configure_sessions(session_json_explicit, &state);
     configure_profiles_locales(&config, &state);
     configure_power(&config);
+    configure_appearance();
     ensure_seat_backend(&config);
     ensure_log_dir();
     ensure_cache_env();
     ensure_backend_path();
     ensure_qml_path();
+    sanitize_env();
 
     let cage_bin = resolve_cage_bin(&config)?;
     let ui_bin = resolve_ui_bin()?;
@@ -83,12 +85,12 @@ struct PersistedState {
 
 fn load_config() -> Config {
     let mut config = Config::default();
-    let system_path = Path::new("/etc/ii-greetd/config.toml");
+    let system_path = Path::new("/etc/tiss-greetd/config.toml");
     if system_path.exists() {
         match Config::load_from_path(system_path) {
             Ok(cfg) => config = config.merge(cfg),
             Err(err) => eprintln!(
-                "ii-greetd-launcher: failed to read {}: {}",
+                "tiss-greetd-launcher: failed to read {}: {}",
                 system_path.display(),
                 err
             ),
@@ -96,12 +98,12 @@ fn load_config() -> Config {
     }
 
     if let Some(home) = env::var_os("HOME") {
-        let user_path = PathBuf::from(home).join(".config/ii-greetd/config.toml");
+        let user_path = PathBuf::from(home).join(".config/tiss-greetd/config.toml");
         if user_path.exists() {
             match Config::load_from_path(&user_path) {
                 Ok(cfg) => config = config.merge(cfg),
                 Err(err) => eprintln!(
-                    "ii-greetd-launcher: failed to read {}: {}",
+                    "tiss-greetd-launcher: failed to read {}: {}",
                     user_path.display(),
                     err
                 ),
@@ -132,7 +134,7 @@ fn set_env_if_missing(key: &str, value: Option<String>) {
 
 fn apply_config_env(config: &Config) -> Result<(), String> {
     set_env_if_missing(
-        "II_GREETD_BACKEND",
+        "TISS_GREETD_BACKEND",
         config
             .paths
             .backend
@@ -140,57 +142,57 @@ fn apply_config_env(config: &Config) -> Result<(), String> {
             .map(|path| path.to_string_lossy().to_string()),
     );
     set_env_if_missing(
-        "II_GREETD_QML_FILE",
+        "TISS_GREETD_QML_FILE",
         config
             .paths
             .qml_file
             .as_ref()
             .map(|path| path.to_string_lossy().to_string()),
     );
-    set_env_if_missing("II_GREETD_QML_URI", config.paths.qml_uri.clone());
+    set_env_if_missing("TISS_GREETD_QML_URI", config.paths.qml_uri.clone());
     set_env_if_missing(
-        "II_GREETD_THEME_DIR",
+        "TISS_GREETD_THEME_DIR",
         config
             .paths
             .theme_dir
             .as_ref()
             .map(|path| path.to_string_lossy().to_string()),
     );
-    set_env_if_missing("II_GREETD_THEME", config.paths.theme.clone());
+    set_env_if_missing("TISS_GREETD_THEME", config.paths.theme.clone());
 
-    set_env_if_missing("II_GREETD_DEFAULT_USER", config.login.default_user.clone());
+    set_env_if_missing("TISS_GREETD_DEFAULT_USER", config.login.default_user.clone());
     set_env_if_missing(
-        "II_GREETD_LOCK_USER",
+        "TISS_GREETD_LOCK_USER",
         config
             .login
             .lock_user
             .map(|value| if value { "1".to_string() } else { "0".to_string() }),
     );
 
-    if env_missing("II_GREETD_SESSION_JSON") && !config.session.command.is_empty() {
+    if env_missing("TISS_GREETD_SESSION_JSON") && !config.session.command.is_empty() {
         let json = serde_json::to_string(&config.session.command)
             .map_err(|err| format!("invalid session.command: {}", err))?;
-        env::set_var("II_GREETD_SESSION_JSON", json);
+        env::set_var("TISS_GREETD_SESSION_JSON", json);
     }
 
-    if env_missing("II_GREETD_SESSION_ENV_JSON") && !config.session.env.is_empty() {
+    if env_missing("TISS_GREETD_SESSION_ENV_JSON") && !config.session.env.is_empty() {
         let json = serde_json::to_string(&config.session.env)
             .map_err(|err| format!("invalid session.env: {}", err))?;
-        env::set_var("II_GREETD_SESSION_ENV_JSON", json);
+        env::set_var("TISS_GREETD_SESSION_ENV_JSON", json);
     }
 
     set_env_if_missing(
-        "II_GREETD_LOG_DIR",
+        "TISS_GREETD_LOG_DIR",
         config
             .logging
             .dir
             .as_ref()
             .map(|path| path.to_string_lossy().to_string()),
     );
-    set_env_if_missing("II_GREETD_LOG_LEVEL", config.logging.level.clone());
+    set_env_if_missing("TISS_GREETD_LOG_LEVEL", config.logging.level.clone());
 
     set_env_if_missing(
-        "II_GREETD_SHOW_PASSWORD_TOGGLE",
+        "TISS_GREETD_SHOW_PASSWORD_TOGGLE",
         config
             .ui
             .show_password_toggle
@@ -203,12 +205,12 @@ fn apply_config_env(config: &Config) -> Result<(), String> {
 fn configure_sessions(session_json_explicit: bool, state: &PersistedState) {
     let sessions = discover_sessions();
     if let Ok(json) = serde_json::to_string(&sessions) {
-        set_env_if_missing("II_GREETD_SESSIONS_JSON", Some(json));
+        set_env_if_missing("TISS_GREETD_SESSIONS_JSON", Some(json));
     } else {
-        eprintln!("ii-greetd-launcher: failed to serialize session list");
+        eprintln!("tiss-greetd-launcher: failed to serialize session list");
     }
 
-    let mut selected_session_id = env::var("II_GREETD_LAST_SESSION_ID")
+    let mut selected_session_id = env::var("TISS_GREETD_LAST_SESSION_ID")
         .ok()
         .and_then(|value| if value.trim().is_empty() { None } else { Some(value) });
     if selected_session_id.is_none() {
@@ -217,11 +219,11 @@ fn configure_sessions(session_json_explicit: bool, state: &PersistedState) {
 
     if let Some(last_session_id) = selected_session_id.as_ref() {
         if sessions.iter().any(|session| session.id == *last_session_id) {
-            set_env_if_missing("II_GREETD_LAST_SESSION_ID", Some(last_session_id.clone()));
+            set_env_if_missing("TISS_GREETD_LAST_SESSION_ID", Some(last_session_id.clone()));
             if !session_json_explicit {
                 if let Some(session) = sessions.iter().find(|session| session.id == *last_session_id) {
                     if let Ok(json) = serde_json::to_string(&session.exec) {
-                        env::set_var("II_GREETD_SESSION_JSON", json);
+                        env::set_var("TISS_GREETD_SESSION_JSON", json);
                     }
                 }
             }
@@ -242,9 +244,9 @@ fn configure_profiles_locales(config: &Config, state: &PersistedState) {
             })
             .collect();
         if let Ok(json) = serde_json::to_string(&entries) {
-            set_env_if_missing("II_GREETD_PROFILES_JSON", Some(json));
+            set_env_if_missing("TISS_GREETD_PROFILES_JSON", Some(json));
         } else {
-            eprintln!("ii-greetd-launcher: failed to serialize profiles");
+            eprintln!("tiss-greetd-launcher: failed to serialize profiles");
         }
     }
 
@@ -256,15 +258,15 @@ fn configure_profiles_locales(config: &Config, state: &PersistedState) {
         || !locales.available.is_empty()
     {
         if let Ok(json) = serde_json::to_string(&locales) {
-            set_env_if_missing("II_GREETD_LOCALES_JSON", Some(json));
+            set_env_if_missing("TISS_GREETD_LOCALES_JSON", Some(json));
         } else {
-            eprintln!("ii-greetd-launcher: failed to serialize locales");
+            eprintln!("tiss-greetd-launcher: failed to serialize locales");
         }
     }
 
     if let Some(last_profile_id) = state.last_profile_id.as_ref() {
         if config.profiles.iter().any(|profile| profile.id == *last_profile_id) {
-            set_env_if_missing("II_GREETD_LAST_PROFILE_ID", Some(last_profile_id.clone()));
+            set_env_if_missing("TISS_GREETD_LAST_PROFILE_ID", Some(last_profile_id.clone()));
         }
     }
 
@@ -272,20 +274,69 @@ fn configure_profiles_locales(config: &Config, state: &PersistedState) {
         if config.locales.available.is_empty()
             || config.locales.available.iter().any(|locale| locale == last_locale)
         {
-            set_env_if_missing("II_GREETD_LAST_LOCALE", Some(last_locale.clone()));
+            set_env_if_missing("TISS_GREETD_LAST_LOCALE", Some(last_locale.clone()));
         }
     }
 }
 
 fn configure_power(config: &Config) {
     if config.power.enabled.is_empty() {
+        if config.power.allowed_states.is_empty() {
+            return;
+        }
+    }
+    if !config.power.allowed_states.is_empty() {
+        if let Ok(json) = serde_json::to_string(&config.power.allowed_states) {
+            set_env_if_missing("TISS_GREETD_POWER_ALLOWED_STATES_JSON", Some(json));
+        } else {
+            eprintln!("tiss-greetd-launcher: failed to serialize power allowed states");
+        }
+    }
+    if !config.power.enabled.is_empty() {
+        if let Ok(json) = serde_json::to_string(&config.power.enabled) {
+            set_env_if_missing("TISS_GREETD_POWER_ACTIONS_JSON", Some(json));
+        } else {
+            eprintln!("tiss-greetd-launcher: failed to serialize power actions");
+        }
+    }
+}
+
+fn configure_appearance() {
+    if !env_missing("TISS_GREETD_APPEARANCE_JSON") {
         return;
     }
-    if let Ok(json) = serde_json::to_string(&config.power.enabled) {
-        set_env_if_missing("II_GREETD_POWER_ACTIONS_JSON", Some(json));
-    } else {
-        eprintln!("ii-greetd-launcher: failed to serialize power actions");
+    let path = appearance_path();
+    let content = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(_) => return,
+    };
+    let value: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(value) => value,
+        Err(err) => {
+            eprintln!(
+                "tiss-greetd-launcher: failed to parse appearance {}: {}",
+                path.display(),
+                err
+            );
+            return;
+        }
+    };
+    match serde_json::to_string(&value) {
+        Ok(json) => env::set_var("TISS_GREETD_APPEARANCE_JSON", json),
+        Err(err) => eprintln!("tiss-greetd-launcher: failed to serialize appearance: {}", err),
     }
+}
+
+fn appearance_path() -> PathBuf {
+    if let Ok(path) = env::var("XDG_STATE_HOME") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path).join("tiss-greetd/appearance.json");
+        }
+    }
+    if let Some(home) = env::var_os("HOME") {
+        return PathBuf::from(home).join(".local/state/tiss-greetd/appearance.json");
+    }
+    PathBuf::from("/tmp/tiss-greetd-appearance.json")
 }
 
 fn discover_sessions() -> Vec<SessionEntry> {
@@ -481,7 +532,7 @@ fn load_state() -> PersistedState {
         Ok(state) => state,
         Err(err) => {
             eprintln!(
-                "ii-greetd-launcher: failed to parse state {}: {}",
+                "tiss-greetd-launcher: failed to parse state {}: {}",
                 path.display(),
                 err
             );
@@ -497,13 +548,13 @@ fn load_state() -> PersistedState {
 fn state_path() -> PathBuf {
     if let Ok(path) = env::var("XDG_STATE_HOME") {
         if !path.trim().is_empty() {
-            return PathBuf::from(path).join("ii-greetd/state.json");
+            return PathBuf::from(path).join("tiss-greetd/state.json");
         }
     }
     if let Some(home) = env::var_os("HOME") {
-        return PathBuf::from(home).join(".local/state/ii-greetd/state.json");
+        return PathBuf::from(home).join(".local/state/tiss-greetd/state.json");
     }
-    PathBuf::from("/tmp/ii-greetd-state.json")
+    PathBuf::from("/tmp/tiss-greetd-state.json")
 }
 
 fn ensure_seat_backend(config: &Config) {
@@ -527,14 +578,14 @@ fn ensure_seat_backend(config: &Config) {
 }
 
 fn ensure_log_dir() {
-    if env_missing("II_GREETD_LOG_DIR") {
-        env::set_var("II_GREETD_LOG_DIR", default_log_dir());
+    if env_missing("TISS_GREETD_LOG_DIR") {
+        env::set_var("TISS_GREETD_LOG_DIR", default_log_dir());
     }
 
-    let current = env::var("II_GREETD_LOG_DIR").unwrap_or_else(|_| "/tmp/ii-greetd".to_string());
+    let current = env::var("TISS_GREETD_LOG_DIR").unwrap_or_else(|_| "/tmp/tiss-greetd".to_string());
     if fs::create_dir_all(&current).is_err() {
-        env::set_var("II_GREETD_LOG_DIR", "/tmp/ii-greetd");
-        let _ = fs::create_dir_all("/tmp/ii-greetd");
+        env::set_var("TISS_GREETD_LOG_DIR", "/tmp/tiss-greetd");
+        let _ = fs::create_dir_all("/tmp/tiss-greetd");
     }
 }
 
@@ -544,7 +595,7 @@ fn ensure_cache_env() {
     }
 
     if env_missing("XDG_CACHE_HOME") {
-        let path = format!("/tmp/ii-greetd-cache-{}", uid_string());
+        let path = format!("/tmp/tiss-greetd-cache-{}", uid_string());
         env::set_var("XDG_CACHE_HOME", &path);
     }
 
@@ -561,8 +612,47 @@ fn ensure_cache_env() {
     }
 }
 
+fn sanitize_env() {
+    let vars: Vec<(String, String)> = env::vars().collect();
+    for (key, _) in vars.iter() {
+        if !env_allowed(key) {
+            env::remove_var(key);
+        }
+    }
+}
+
+fn env_allowed(key: &str) -> bool {
+    let prefixes = [
+        "TISS_GREETD_",
+        "XDG_",
+        "WAYLAND_",
+        "QT_",
+        "QML_",
+        "MESA_",
+        "WLR_",
+        "XKB_",
+        "LC_",
+    ];
+    if prefixes.iter().any(|prefix| key.starts_with(prefix)) {
+        return true;
+    }
+    matches!(
+        key,
+        "PATH"
+            | "HOME"
+            | "USER"
+            | "LOGNAME"
+            | "SHELL"
+            | "TERM"
+            | "LANG"
+            | "DISPLAY"
+            | "GREETD_SOCK"
+            | "LIBSEAT_BACKEND"
+    )
+}
+
 fn default_log_dir() -> String {
-    format!("/tmp/ii-greetd-{}", uid_string())
+    format!("/tmp/tiss-greetd-{}", uid_string())
 }
 
 fn uid_string() -> String {
@@ -570,53 +660,53 @@ fn uid_string() -> String {
 }
 
 fn ensure_backend_path() {
-    if !env_missing("II_GREETD_BACKEND") {
+    if !env_missing("TISS_GREETD_BACKEND") {
         return;
     }
 
     let candidates = [
-        "/usr/lib/ii-greetd/ii-greetd-backend",
-        "/usr/local/lib/ii-greetd/ii-greetd-backend",
+        "/usr/lib/tiss-greetd/tiss-greetd-backend",
+        "/usr/local/lib/tiss-greetd/tiss-greetd-backend",
     ];
     for candidate in candidates {
         let path = Path::new(candidate);
         if is_executable(path) {
-            env::set_var("II_GREETD_BACKEND", candidate);
+            env::set_var("TISS_GREETD_BACKEND", candidate);
             return;
         }
     }
 
-    if let Some(path) = find_executable("ii-greetd-backend") {
-        env::set_var("II_GREETD_BACKEND", path.to_string_lossy().to_string());
+    if let Some(path) = find_executable("tiss-greetd-backend") {
+        env::set_var("TISS_GREETD_BACKEND", path.to_string_lossy().to_string());
     }
 }
 
 fn ensure_qml_path() {
-    if !env_missing("II_GREETD_QML_FILE") {
+    if !env_missing("TISS_GREETD_QML_FILE") {
         return;
     }
 
     let candidates = [
-        "/usr/share/ii-greetd/qml/Main.qml",
-        "/usr/local/share/ii-greetd/qml/Main.qml",
+        "/usr/share/tiss-greetd/qml/Main.qml",
+        "/usr/local/share/tiss-greetd/qml/Main.qml",
     ];
     for candidate in candidates {
         let path = Path::new(candidate);
         if path.exists() {
-            env::set_var("II_GREETD_QML_FILE", candidate);
+            env::set_var("TISS_GREETD_QML_FILE", candidate);
             return;
         }
     }
 }
 
 fn resolve_cage_bin(config: &Config) -> Result<PathBuf, String> {
-    if let Ok(path) = env::var("II_GREETD_CAGE_BIN") {
+    if let Ok(path) = env::var("TISS_GREETD_CAGE_BIN") {
         if !path.trim().is_empty() {
             let path = PathBuf::from(path);
             if is_executable(&path) {
                 return Ok(path);
             }
-            return Err("cage not found (II_GREETD_CAGE_BIN)".to_string());
+            return Err("cage not found (TISS_GREETD_CAGE_BIN)".to_string());
         }
     }
 
@@ -635,26 +725,26 @@ fn resolve_cage_bin(config: &Config) -> Result<PathBuf, String> {
 }
 
 fn resolve_ui_bin() -> Result<PathBuf, String> {
-    if let Ok(path) = env::var("II_GREETD_UI_BIN") {
+    if let Ok(path) = env::var("TISS_GREETD_UI_BIN") {
         if !path.trim().is_empty() {
             let path = PathBuf::from(path);
             if is_executable(&path) {
                 return Ok(path);
             }
-            return Err("ii-greetd-ui not found (II_GREETD_UI_BIN)".to_string());
+            return Err("tiss-greetd-ui not found (TISS_GREETD_UI_BIN)".to_string());
         }
     }
 
-    if let Some(path) = find_executable("ii-greetd-ui") {
+    if let Some(path) = find_executable("tiss-greetd-ui") {
         return Ok(path);
     }
 
-    Err("ii-greetd-ui not found".to_string())
+    Err("tiss-greetd-ui not found".to_string())
 }
 
 fn build_cage_args(config: &Config) -> Vec<String> {
     let mut args = vec!["-s".to_string()];
-    if let Ok(raw) = env::var("II_GREETD_CAGE_ARGS") {
+    if let Ok(raw) = env::var("TISS_GREETD_CAGE_ARGS") {
         let extra = split_args(&raw);
         if !extra.is_empty() {
             args.extend(extra);

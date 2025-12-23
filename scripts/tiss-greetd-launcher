@@ -2,13 +2,13 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-local_bin="${root_dir}/launcher/target/release/ii-greetd-launcher"
+local_bin="${root_dir}/launcher/target/release/tiss-greetd-launcher"
 
 if [[ -x "${local_bin}" ]]; then
   exec "${local_bin}" "$@"
 fi
 
-found="$(command -v ii-greetd-launcher 2>/dev/null || true)"
+found="$(command -v tiss-greetd-launcher 2>/dev/null || true)"
 if [[ -n "${found}" ]]; then
   self_path="$(readlink -f "$0" 2>/dev/null || echo "$0")"
   found_path="$(readlink -f "${found}" 2>/dev/null || echo "${found}")"
@@ -17,5 +17,5 @@ if [[ -n "${found}" ]]; then
   fi
 fi
 
-echo "ii-greetd-launcher: build ./launcher (cargo build --release) or install the launcher binary" >&2
+echo "tiss-greetd-launcher: build ./launcher (cargo build --release) or install the launcher binary" >&2
 exit 1

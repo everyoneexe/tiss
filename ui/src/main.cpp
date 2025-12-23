@@ -10,8 +10,10 @@
 #include <QMap>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QScreen>
 #include <QStringList>
 #include <QTextStream>
+#include <QThread>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -38,7 +40,7 @@ static QStringList parseSessionCommandJson(const QString &raw) {
     QJsonParseError err;
     const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &err);
     if (err.error != QJsonParseError::NoError || !doc.isArray()) {
-        qWarning() << "invalid II_GREETD_SESSION_JSON";
+        qWarning() << "invalid TISS_GREETD_SESSION_JSON";
         return {};
     }
     QStringList result;
@@ -59,7 +61,7 @@ static QVariantMap parseSessionEnvJson(const QString &raw) {
     QJsonParseError err;
     const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &err);
     if (err.error != QJsonParseError::NoError || !doc.isObject()) {
-        qWarning() << "invalid II_GREETD_SESSION_ENV_JSON";
+        qWarning() << "invalid TISS_GREETD_SESSION_ENV_JSON";
         return result;
     }
     const QJsonObject obj = doc.object();
@@ -82,7 +84,7 @@ static QVariantList parseSessionsJson(const QString &raw) {
     QJsonParseError err;
     const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &err);
     if (err.error != QJsonParseError::NoError || !doc.isArray()) {
-        qWarning() << "invalid II_GREETD_SESSIONS_JSON";
+        qWarning() << "invalid TISS_GREETD_SESSIONS_JSON";
         return result;
     }
     const QJsonArray arr = doc.array();
@@ -103,7 +105,7 @@ static QVariantList parseProfilesJson(const QString &raw) {
     QJsonParseError err;
     const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &err);
     if (err.error != QJsonParseError::NoError || !doc.isArray()) {
-        qWarning() << "invalid II_GREETD_PROFILES_JSON";
+        qWarning() << "invalid TISS_GREETD_PROFILES_JSON";
         return result;
     }
     const QJsonArray arr = doc.array();
@@ -124,7 +126,7 @@ static QVariantMap parseLocalesJson(const QString &raw) {
     QJsonParseError err;
     const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &err);
     if (err.error != QJsonParseError::NoError || !doc.isObject()) {
-        qWarning() << "invalid II_GREETD_LOCALES_JSON";
+        qWarning() << "invalid TISS_GREETD_LOCALES_JSON";
         return result;
     }
     const QJsonObject obj = doc.object();
@@ -145,7 +147,7 @@ static QVariantList parsePowerActionsJson(const QString &raw) {
     QJsonParseError err;
     const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &err);
     if (err.error != QJsonParseError::NoError || !doc.isArray()) {
-        qWarning() << "invalid II_GREETD_POWER_ACTIONS_JSON";
+        qWarning() << "invalid TISS_GREETD_POWER_ACTIONS_JSON";
         return result;
     }
     const QJsonArray arr = doc.array();
@@ -157,6 +159,20 @@ static QVariantList parsePowerActionsJson(const QString &raw) {
     return result;
 }
 
+static QVariantMap parseAppearanceJson(const QString &raw) {
+    QVariantMap result;
+    if (raw.trimmed().isEmpty()) {
+        return result;
+    }
+    QJsonParseError err;
+    const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        qWarning() << "invalid TISS_GREETD_APPEARANCE_JSON";
+        return result;
+    }
+    return doc.object().toVariantMap();
+}
+
 static void ensureCacheEnv() {
     if (qEnvironmentVariableIsEmpty("QML_DISABLE_DISK_CACHE")) {
         qputenv("QML_DISABLE_DISK_CACHE", "1");
@@ -165,7 +181,7 @@ static void ensureCacheEnv() {
     QByteArray cacheHome = qgetenv("XDG_CACHE_HOME");
     QString cachePath;
     if (cacheHome.isEmpty()) {
-        const QString fallback = QDir::temp().filePath("ii-greetd-cache");
+        const QString fallback = QDir::temp().filePath("tiss-greetd-cache");
         QDir().mkpath(fallback);
         qputenv("XDG_CACHE_HOME", fallback.toUtf8());
         cachePath = fallback;
@@ -200,14 +216,14 @@ static QString readUidFromProc() {
 }
 
 static QString defaultLogDir() {
-    const QString envDir = qEnvironmentVariable("II_GREETD_LOG_DIR");
+    const QString envDir = qEnvironmentVariable("TISS_GREETD_LOG_DIR");
     if (!envDir.isEmpty()) {
         return envDir;
     }
 
     const QString uid = readUidFromProc();
     if (!uid.isEmpty()) {
-        return QDir::temp().filePath(QString("ii-greetd-%1").arg(uid));
+        return QDir::temp().filePath(QString("tiss-greetd-%1").arg(uid));
     }
 
     QString user = qEnvironmentVariable("USER");
@@ -220,7 +236,7 @@ static QString defaultLogDir() {
     if (user.isEmpty()) {
         user = "unknown";
     }
-    return QDir::temp().filePath(QString("ii-greetd-%1").arg(user));
+    return QDir::temp().filePath(QString("tiss-greetd-%1").arg(user));
 }
 
 static QFile *g_logFile = nullptr;
@@ -262,7 +278,7 @@ static void messageHandler(QtMsgType type, const QMessageLogContext &, const QSt
 static void initLogging() {
     const QString dir = defaultLogDir();
     QDir().mkpath(dir);
-    g_logFile = new QFile(QDir(dir).filePath("ii-greetd-ui.log"));
+    g_logFile = new QFile(QDir(dir).filePath("tiss-greetd-ui.log"));
     if (!g_logFile->open(QIODevice::Append | QIODevice::Text)) {
         delete g_logFile;
         g_logFile = nullptr;
@@ -297,10 +313,10 @@ static QStringList themeSearchRoots() {
     QStringList roots;
     const QString home = QDir::homePath();
     if (!home.isEmpty()) {
-        roots << QDir(home).filePath(".local/share/ii-greetd/themes");
+        roots << QDir(home).filePath(".local/share/tiss-greetd/themes");
     }
-    roots << QStringLiteral("/usr/local/share/ii-greetd/themes");
-    roots << QStringLiteral("/usr/share/ii-greetd/themes");
+    roots << QStringLiteral("/usr/local/share/tiss-greetd/themes");
+    roots << QStringLiteral("/usr/share/tiss-greetd/themes");
     const QString appDir = QCoreApplication::applicationDirPath();
     roots << QDir(appDir).filePath("../themes");
     roots << QDir(appDir).filePath("../../themes");
@@ -375,8 +391,8 @@ static bool loadFromDisk(QQmlApplicationEngine &engine) {
     const QStringList candidates = {
         QDir(appDir).filePath("qml/Main.qml"),
         QDir(appDir).filePath("../qml/Main.qml"),
-        QStringLiteral("/usr/local/share/ii-greetd/qml/Main.qml"),
-        QStringLiteral("/usr/share/ii-greetd/qml/Main.qml"),
+        QStringLiteral("/usr/local/share/tiss-greetd/qml/Main.qml"),
+        QStringLiteral("/usr/share/tiss-greetd/qml/Main.qml"),
     };
     for (const auto &candidate : candidates) {
         if (!QFileInfo::exists(candidate)) {
@@ -394,13 +410,46 @@ static QString logFilePath() {
     if (g_logFile && g_logFile->isOpen()) {
         return g_logFile->fileName();
     }
-    return QDir(defaultLogDir()).filePath("ii-greetd-ui.log");
+    return QDir(defaultLogDir()).filePath("tiss-greetd-ui.log");
+}
+
+static bool hasValidOutput() {
+    const auto screens = QGuiApplication::screens();
+    if (screens.isEmpty()) {
+        return false;
+    }
+    for (const auto *screen : screens) {
+        if (!screen) {
+            continue;
+        }
+        const QSize size = screen->geometry().size();
+        if (size.width() > 0 && size.height() > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool waitForOutputs() {
+    const int delays[] = {100, 300, 1000};
+    if (hasValidOutput()) {
+        return true;
+    }
+    for (const int delay : delays) {
+        qWarning() << "no outputs yet; retry in" << delay << "ms";
+        QCoreApplication::processEvents(QEventLoop::AllEvents, delay);
+        QThread::msleep(delay);
+        if (hasValidOutput()) {
+            return true;
+        }
+    }
+    return hasValidOutput();
 }
 
 static bool loadThemeError(QQmlApplicationEngine &engine, const QString &title, const QString &detail) {
-    engine.rootContext()->setContextProperty("iiThemeErrorTitle", title);
-    engine.rootContext()->setContextProperty("iiThemeErrorDetail", detail);
-    engine.rootContext()->setContextProperty("iiThemeErrorHint", QStringLiteral("Fix the theme path or QML errors, then restart greetd."));
+    engine.rootContext()->setContextProperty("tissThemeErrorTitle", title);
+    engine.rootContext()->setContextProperty("tissThemeErrorDetail", detail);
+    engine.rootContext()->setContextProperty("tissThemeErrorHint", QStringLiteral("Fix the theme path or QML errors, then restart greetd."));
     static const char kErrorQml[] = R"QML(
 import QtQuick 2.15
 import QtQuick.Controls 2.15
@@ -413,7 +462,7 @@ ApplicationWindow {
     width: outputReady ? Screen.width : 1280
     height: outputReady ? Screen.height : 720
     visible: true
-    title: "ii-greetd: theme error"
+    title: "tiss-greetd: theme error"
     color: "#0e0f12"
 
     ColumnLayout {
@@ -422,7 +471,7 @@ ApplicationWindow {
         width: parent.width * 0.8
 
         Text {
-            text: iiThemeErrorTitle
+            text: tissThemeErrorTitle
             color: "#f2c1c1"
             font.pixelSize: 26
             font.bold: true
@@ -432,7 +481,7 @@ ApplicationWindow {
         }
 
         Text {
-            text: iiThemeErrorDetail
+            text: tissThemeErrorDetail
             color: "#e1e5ea"
             font.pixelSize: 14
             horizontalAlignment: Text.AlignHCenter
@@ -441,7 +490,7 @@ ApplicationWindow {
         }
 
         Text {
-            text: iiThemeErrorHint
+            text: tissThemeErrorHint
             color: "#9aa3ad"
             font.pixelSize: 12
             horizontalAlignment: Text.AlignHCenter
@@ -451,7 +500,7 @@ ApplicationWindow {
     }
 }
 )QML";
-    engine.loadData(QByteArray(kErrorQml), QUrl("qrc:/ii-greetd-theme-error.qml"));
+    engine.loadData(QByteArray(kErrorQml), QUrl("qrc:/tiss-greetd-theme-error.qml"));
     return !engine.rootObjects().isEmpty();
 }
 
@@ -460,10 +509,18 @@ int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
     initLogging();
 
-    qmlRegisterType<BackendProcess>("IIGreetd", 1, 0, "BackendProcess");
-    qmlRegisterType<BackendProcess>("IIGreeter", 1, 0, "BackendProcess");
+    if (!waitForOutputs()) {
+        qCritical() << "no wayland outputs after retries; aborting (log:"
+                    << logFilePath() << ")";
+        return 1;
+    }
+
+    qmlRegisterType<BackendProcess>("TissGreetd", 1, 0, "BackendProcess");
+    qmlRegisterType<BackendProcess>("TissGreeter", 1, 0, "BackendProcess");
 
     QQmlApplicationEngine engine;
+    engine.addImportPath(QStringLiteral("/usr/local/share/tiss-greetd/qml"));
+    engine.addImportPath(QStringLiteral("/usr/share/tiss-greetd/qml"));
     engine.setOutputWarningsToStandardError(true);
     QObject::connect(&engine, &QQmlEngine::warnings, [](const QList<QQmlError> &warnings) {
         QTextStream err(stderr);
@@ -471,38 +528,40 @@ int main(int argc, char *argv[]) {
             err << warning.toString() << '\n';
         }
     });
-    const QString defaultUser = qEnvironmentVariable("II_GREETD_DEFAULT_USER");
-    const bool lockUser = envBool("II_GREETD_LOCK_USER", false);
-    const bool showPasswordToggle = envBool("II_GREETD_SHOW_PASSWORD_TOGGLE", true);
-    const QStringList sessionCommand = parseSessionCommandJson(qEnvironmentVariable("II_GREETD_SESSION_JSON"));
-    const QVariantMap sessionEnv = parseSessionEnvJson(qEnvironmentVariable("II_GREETD_SESSION_ENV_JSON"));
-    const QVariantList sessions = parseSessionsJson(qEnvironmentVariable("II_GREETD_SESSIONS_JSON"));
-    const QString lastSessionId = qEnvironmentVariable("II_GREETD_LAST_SESSION_ID");
-    const QVariantList profiles = parseProfilesJson(qEnvironmentVariable("II_GREETD_PROFILES_JSON"));
-    const QVariantMap locales = parseLocalesJson(qEnvironmentVariable("II_GREETD_LOCALES_JSON"));
-    const QVariantList powerActions = parsePowerActionsJson(qEnvironmentVariable("II_GREETD_POWER_ACTIONS_JSON"));
-    const QString lastProfileId = qEnvironmentVariable("II_GREETD_LAST_PROFILE_ID");
-    const QString lastLocale = qEnvironmentVariable("II_GREETD_LAST_LOCALE");
-    engine.rootContext()->setContextProperty("iiDefaultUser", defaultUser);
-    engine.rootContext()->setContextProperty("iiLockUser", lockUser);
-    engine.rootContext()->setContextProperty("iiShowPasswordToggle", showPasswordToggle);
-    engine.rootContext()->setContextProperty("iiSessionCommand", sessionCommand);
-    engine.rootContext()->setContextProperty("iiSessionEnv", sessionEnv);
-    engine.rootContext()->setContextProperty("iiSessions", sessions);
-    engine.rootContext()->setContextProperty("iiLastSessionId", lastSessionId);
-    engine.rootContext()->setContextProperty("iiProfiles", profiles);
-    engine.rootContext()->setContextProperty("iiLocales", locales);
-    engine.rootContext()->setContextProperty("iiPowerActions", powerActions);
-    engine.rootContext()->setContextProperty("iiLastProfileId", lastProfileId);
-    engine.rootContext()->setContextProperty("iiLastLocale", lastLocale);
-    const bool qmlUriExplicit = !qEnvironmentVariableIsEmpty("II_GREETD_QML_URI");
-    QString qmlUri = qEnvironmentVariable("II_GREETD_QML_URI");
+    const QString defaultUser = qEnvironmentVariable("TISS_GREETD_DEFAULT_USER");
+    const bool lockUser = envBool("TISS_GREETD_LOCK_USER", false);
+    const bool showPasswordToggle = envBool("TISS_GREETD_SHOW_PASSWORD_TOGGLE", true);
+    const QStringList sessionCommand = parseSessionCommandJson(qEnvironmentVariable("TISS_GREETD_SESSION_JSON"));
+    const QVariantMap sessionEnv = parseSessionEnvJson(qEnvironmentVariable("TISS_GREETD_SESSION_ENV_JSON"));
+    const QVariantList sessions = parseSessionsJson(qEnvironmentVariable("TISS_GREETD_SESSIONS_JSON"));
+    const QString lastSessionId = qEnvironmentVariable("TISS_GREETD_LAST_SESSION_ID");
+    const QVariantList profiles = parseProfilesJson(qEnvironmentVariable("TISS_GREETD_PROFILES_JSON"));
+    const QVariantMap locales = parseLocalesJson(qEnvironmentVariable("TISS_GREETD_LOCALES_JSON"));
+    const QVariantList powerActions = parsePowerActionsJson(qEnvironmentVariable("TISS_GREETD_POWER_ACTIONS_JSON"));
+    const QString lastProfileId = qEnvironmentVariable("TISS_GREETD_LAST_PROFILE_ID");
+    const QString lastLocale = qEnvironmentVariable("TISS_GREETD_LAST_LOCALE");
+    const QVariantMap appearance = parseAppearanceJson(qEnvironmentVariable("TISS_GREETD_APPEARANCE_JSON"));
+    engine.rootContext()->setContextProperty("tissDefaultUser", defaultUser);
+    engine.rootContext()->setContextProperty("tissLockUser", lockUser);
+    engine.rootContext()->setContextProperty("tissShowPasswordToggle", showPasswordToggle);
+    engine.rootContext()->setContextProperty("tissSessionCommand", sessionCommand);
+    engine.rootContext()->setContextProperty("tissSessionEnv", sessionEnv);
+    engine.rootContext()->setContextProperty("tissSessions", sessions);
+    engine.rootContext()->setContextProperty("tissLastSessionId", lastSessionId);
+    engine.rootContext()->setContextProperty("tissProfiles", profiles);
+    engine.rootContext()->setContextProperty("tissLocales", locales);
+    engine.rootContext()->setContextProperty("tissPowerActions", powerActions);
+    engine.rootContext()->setContextProperty("tissLastProfileId", lastProfileId);
+    engine.rootContext()->setContextProperty("tissLastLocale", lastLocale);
+    engine.rootContext()->setContextProperty("tissAppearance", appearance);
+    const bool qmlUriExplicit = !qEnvironmentVariableIsEmpty("TISS_GREETD_QML_URI");
+    QString qmlUri = qEnvironmentVariable("TISS_GREETD_QML_URI");
     if (qmlUri.isEmpty()) {
-        qmlUri = QStringLiteral("IIGreetd");
+        qmlUri = QStringLiteral("TissGreetd");
     }
-    QString qmlFileOverride = qEnvironmentVariable("II_GREETD_QML_FILE");
-    QString themeDir = qEnvironmentVariable("II_GREETD_THEME_DIR");
-    QString themeName = qEnvironmentVariable("II_GREETD_THEME");
+    QString qmlFileOverride = qEnvironmentVariable("TISS_GREETD_QML_FILE");
+    QString themeDir = qEnvironmentVariable("TISS_GREETD_THEME_DIR");
+    QString themeName = qEnvironmentVariable("TISS_GREETD_THEME");
 
     bool loaded = false;
     QString errorDetail;

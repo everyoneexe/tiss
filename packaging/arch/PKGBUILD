@@ -1,9 +1,9 @@
 # Maintainer: local
 
-pkgname=ii-greetd-qml
+pkgname=tiss-greetd-qml
 pkgver=0.1.0.r0.g0000000
 pkgrel=1
-pkgdesc="QML-based greetd greeter (ii-greetd)"
+pkgdesc="QML-based greetd greeter (tiss-greetd)"
 arch=(x86_64)
 license=(custom)
 depends=(qt6-base qt6-declarative greetd cage libseat)
@@ -11,7 +11,7 @@ makedepends=(cmake rust cargo git)
 optdepends=(
   "seatd: seat management backend if not using logind"
 )
-install=ii-greetd-qml.install
+install=tiss-greetd-qml.install
 
 # Update this URL to your repo.
 _repo_url="git@github.com:everyoneexe/ingress.git"
@@ -50,14 +50,15 @@ build() {
 package() {
   local root="${srcdir}/${pkgname}"
 
-  install -Dm755 "${srcdir}/target/release/ii-greetd-backend" "${pkgdir}/usr/lib/ii-greetd/ii-greetd-backend"
-  install -Dm755 "${srcdir}/build-ui/ii-greetd-ui" "${pkgdir}/usr/bin/ii-greetd-ui"
-  install -Dm755 "${srcdir}/target/release/ii-greetd-launcher" "${pkgdir}/usr/bin/ii-greetd-launcher"
+  install -Dm755 "${srcdir}/target/release/tiss-greetd-backend" "${pkgdir}/usr/lib/tiss-greetd/tiss-greetd-backend"
+  install -Dm755 "${srcdir}/build-ui/tiss-greetd-ui" "${pkgdir}/usr/bin/tiss-greetd-ui"
+  install -Dm755 "${srcdir}/target/release/tiss-greetd-launcher" "${pkgdir}/usr/bin/tiss-greetd-launcher"
+  install -Dm755 "${srcdir}/target/release/tiss-greetd-appearance" "${pkgdir}/usr/bin/tiss-greetd-appearance"
 
-  install -Dm644 "${root}/ui/qml/Main.qml" "${pkgdir}/usr/share/ii-greetd/qml/Main.qml"
-  install -Dm644 "${root}/docs/greetd-config.toml.example" "${pkgdir}/usr/share/ii-greetd/greetd-config.toml.example"
-  install -Dm644 "${root}/docs/ii-greetd-config.toml.example" "${pkgdir}/usr/share/ii-greetd/config.toml.example"
+  install -Dm644 "${root}/ui/qml/Main.qml" "${pkgdir}/usr/share/tiss-greetd/qml/Main.qml"
+  install -Dm644 "${root}/docs/greetd-config.toml.example" "${pkgdir}/usr/share/tiss-greetd/greetd-config.toml.example"
+  install -Dm644 "${root}/docs/tiss-greetd-config.toml.example" "${pkgdir}/usr/share/tiss-greetd/config.toml.example"
 
-  install -Dm644 "${root}/README.md" "${pkgdir}/usr/share/doc/ii-greetd-qml/README.md"
-  install -Dm644 "${root}/docs/run.md" "${pkgdir}/usr/share/doc/ii-greetd-qml/run.md"
+  install -Dm644 "${root}/README.md" "${pkgdir}/usr/share/doc/tiss-greetd-qml/README.md"
+  install -Dm644 "${root}/docs/run.md" "${pkgdir}/usr/share/doc/tiss-greetd-qml/run.md"
 }

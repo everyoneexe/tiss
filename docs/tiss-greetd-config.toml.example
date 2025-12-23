@@ -1,25 +1,25 @@
-# ii-greetd config example
+# tiss-greetd config example
 # Load order (last wins):
-#   /etc/ii-greetd/config.toml
-#   ~/.config/ii-greetd/config.toml
+#   /etc/tiss-greetd/config.toml
+#   ~/.config/tiss-greetd/config.toml
 # Environment variables override both.
 
 [paths]
 # Absolute path to the backend binary.
-backend = "/usr/lib/ii-greetd/ii-greetd-backend"
+backend = "/usr/lib/tiss-greetd/tiss-greetd-backend"
 
 # Absolute path to the QML entry point for your theme.
 # Leave unset to use theme_dir/theme instead.
-# qml_file = "/usr/share/ii-greetd/qml/Main.qml"
+# qml_file = "/usr/share/tiss-greetd/qml/Main.qml"
 
 # Optional theme directory (contains Main.qml). Ignored when qml_file is set.
-theme_dir = "/usr/share/ii-greetd/themes/lockscreen-vibe"
+theme_dir = "/usr/share/tiss-greetd/themes/lockscreen-vibe"
 
 # Optional theme name (searched in standard theme directories).
 theme = "lockscreen-vibe"
 
 # Optional QML module URI fallback (when no qml_file is set).
-qml_uri = "IIGreetd"
+qml_uri = "TissGreetd"
 
 [login]
 # Prefill username field.
@@ -59,10 +59,12 @@ available = ["tr_TR.UTF-8", "en_US.UTF-8"]
 
 [power]
 enabled = ["poweroff", "reboot", "suspend"]
+# Allowed backend phases for power actions.
+allowed_states = ["idle"]
 
 [logging]
 # Directory for UI/backend logs.
-dir = "/tmp/ii-greetd-logs"
+dir = "/tmp/tiss-greetd-logs"
 
 # Log level: "debug", "info", "warn", "error".
 level = "info"

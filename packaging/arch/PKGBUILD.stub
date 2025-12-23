@@ -1,7 +1,7 @@
-# PKGBUILD stub for ii-greetd-qml
+# PKGBUILD stub for tiss-greetd-qml
 # TODO: split into backend/ui or package both.
 
-pkgname=ii-greetd-qml
+pkgname=tiss-greetd-qml
 pkgver=0.1.0
 pkgrel=1
 arch=(x86_64)

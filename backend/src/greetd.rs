@@ -60,6 +60,7 @@ impl AuthErrorCode {
 pub struct AuthError {
     code: AuthErrorCode,
     message: String,
+    return_to_idle: bool,
 }
 
 impl AuthError {
@@ -67,6 +68,7 @@ impl AuthError {
         AuthError {
             code: kind.code(),
             message: format_auth_error(kind, detail),
+            return_to_idle: false,
         }
     }
 
@@ -74,6 +76,23 @@ impl AuthError {
         AuthError {
             code: AuthErrorCode::PamError,
             message: message.into(),
+            return_to_idle: false,
+        }
+    }
+
+    pub fn cancelled() -> Self {
+        AuthError {
+            code: AuthErrorCode::PamError,
+            message: "authentication cancelled".to_string(),
+            return_to_idle: true,
+        }
+    }
+
+    pub fn timeout() -> Self {
+        AuthError {
+            code: AuthErrorCode::PamError,
+            message: "authentication timed out".to_string(),
+            return_to_idle: true,
         }
     }
 
@@ -83,6 +102,10 @@ impl AuthError {
 
     pub fn message(&self) -> &str {
         &self.message
+    }
+
+    pub fn return_to_idle(&self) -> bool {
+        self.return_to_idle
     }
 }
 
@@ -102,8 +125,9 @@ impl From<anyhow::Error> for AuthError {
 
 pub type AuthResult<T> = std::result::Result<T, AuthError>;
 
-fn write_request(stream: &mut UnixStream, req: &Request) -> anyhow::Result<()> {
-    let payload = serde_json::to_vec(req).context("serialize greetd request")?;
+fn write_request(stream: &mut UnixStream, mut req: Request) -> anyhow::Result<()> {
+    let payload = serde_json::to_vec(&req).context("serialize greetd request")?;
+    zero_request(&mut req);
     let len = u32::try_from(payload.len()).context("payload too large")?;
     stream
         .write_all(&len.to_ne_bytes())
@@ -127,7 +151,7 @@ fn read_response(stream: &mut UnixStream) -> anyhow::Result<Response> {
 }
 
 fn cancel_session(stream: &mut UnixStream) {
-    let _ = write_request(stream, &Request::CancelSession);
+    let _ = write_request(stream, Request::CancelSession);
 }
 
 pub fn authenticate_and_start(
@@ -144,7 +168,7 @@ pub fn authenticate_and_start(
     log.log(&format!("create_session {}", username));
     write_request(
         &mut stream,
-        &Request::CreateSession {
+        Request::CreateSession {
             username: username.to_string(),
         },
     )?;
@@ -177,7 +201,7 @@ pub fn authenticate_and_start(
                     };
                     write_request(
                         &mut stream,
-                        &Request::PostAuthMessageResponse { response },
+                        Request::PostAuthMessageResponse { response },
                     )?;
                 }
                 AuthMessageType::Visible | AuthMessageType::Secret => {
@@ -200,7 +224,7 @@ pub fn authenticate_and_start(
                     };
                     write_request(
                         &mut stream,
-                        &Request::PostAuthMessageResponse {
+                        Request::PostAuthMessageResponse {
                             response: Some(response),
                         },
                     )?;
@@ -231,7 +255,7 @@ pub fn authenticate_and_start(
     on_waiting();
     write_request(
         &mut stream,
-        &Request::StartSession {
+        Request::StartSession {
             cmd: command.to_vec(),
             env: env.to_vec(),
         },
@@ -268,29 +292,70 @@ impl AuthFailureKind {
 }
 
 fn classify_auth_failure(description: &str, detail: &str) -> AuthFailureKind {
-    let mut haystack = String::new();
-    haystack.push_str(description);
-    haystack.push(' ');
-    haystack.push_str(detail);
-    let haystack = haystack.to_lowercase();
+    let mut joined = String::new();
+    joined.push_str(description);
+    joined.push(' ');
+    joined.push_str(detail);
 
-    if haystack.contains("acct_expired")
-        || haystack.contains("authtok_expired")
-        || haystack.contains("new_authtok_reqd")
-        || haystack.contains("expired")
-    {
-        return AuthFailureKind::Expired;
+    if let Some(token) = extract_pam_error_token(&joined) {
+        if let Some(kind) = map_pam_token(token) {
+            return kind;
+        }
     }
 
-    if haystack.contains("account locked")
-        || haystack.contains("locked")
-        || haystack.contains("maxtries")
-        || haystack.contains("perm_denied")
+    let lowered = joined.to_lowercase();
+    if lowered.contains("account locked")
+        || lowered.contains("too many failed")
+        || lowered.contains("maximum number of retries")
+        || lowered.contains("faillock")
     {
         return AuthFailureKind::AccountLocked;
     }
 
+    if lowered.contains("password expired")
+        || lowered.contains("authentication token is no longer valid")
+        || lowered.contains("new password required")
+        || lowered.contains("password change required")
+    {
+        return AuthFailureKind::Expired;
+    }
+
     AuthFailureKind::AuthErr
+}
+
+fn extract_pam_error_token(haystack: &str) -> Option<&str> {
+    haystack
+        .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
+        .find(|token| token.starts_with("PAM_"))
+}
+
+fn map_pam_token(token: &str) -> Option<AuthFailureKind> {
+    match token {
+        "PAM_ACCT_EXPIRED"
+        | "PAM_CRED_EXPIRED"
+        | "PAM_AUTHTOK_EXPIRED"
+        | "PAM_NEW_AUTHTOK_REQD" => Some(AuthFailureKind::Expired),
+        "PAM_MAXTRIES" => Some(AuthFailureKind::AccountLocked),
+        "PAM_PERM_DENIED" => Some(AuthFailureKind::AccountLocked),
+        "PAM_AUTH_ERR" | "PAM_USER_UNKNOWN" | "PAM_CRED_INSUFFICIENT" => {
+            Some(AuthFailureKind::AuthErr)
+        }
+        _ => None,
+    }
+}
+
+fn zero_request(req: &mut Request) {
+    if let Request::PostAuthMessageResponse { response } = req {
+        if let Some(ref mut value) = response {
+            zero_string(value);
+        }
+    }
+}
+
+fn zero_string(value: &mut String) {
+    unsafe {
+        value.as_mut_vec().fill(0);
+    }
 }
 
 fn format_auth_error(kind: AuthFailureKind, detail: &str) -> String {

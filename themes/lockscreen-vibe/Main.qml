@@ -2,7 +2,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Window 2.15
-import IIGreetd 1.0
+import TissGreetd 1.0
 
 ApplicationWindow {
     id: root
@@ -10,12 +10,12 @@ ApplicationWindow {
     width: outputReady ? Screen.width : 1280
     height: outputReady ? Screen.height : 720
     visible: outputReady
-    title: "liminal-greetd"
+    title: "tiss-greetd"
     color: "#0b0c10"
 
-    property string defaultUser: iiDefaultUser
-    property bool lockUser: iiLockUser
-    property bool showPasswordToggle: iiShowPasswordToggle
+    property string defaultUser: tissDefaultUser
+    property bool lockUser: tissLockUser
+    property bool showPasswordToggle: tissShowPasswordToggle
     property bool busy: backend.busy
     property bool hasUser: (lockUser ? defaultUser.length > 0 : usernameField.text.length > 0)
     property bool showPassword: false
@@ -26,14 +26,15 @@ ApplicationWindow {
     property bool promptEcho: true
     property bool promptActive: promptId >= 0
     property bool promptNeedsInput: promptKind === "visible" || promptKind === "secret"
-    property string lastSessionId: iiLastSessionId
-    property string lastProfileId: iiLastProfileId
-    property string lastLocale: iiLastLocale
+    property string stagedPromptResponse: ""
+    property string lastSessionId: tissLastSessionId
+    property string lastProfileId: tissLastProfileId
+    property string lastLocale: tissLastLocale
 
     BackendProcess {
         id: backend
-        sessionCommand: iiSessionCommand
-        sessionEnv: iiSessionEnv
+        sessionCommand: tissSessionCommand
+        sessionEnv: tissSessionEnv
         onPhaseChanged: {
             if (phase === "auth") {
                 statusText.text = "Authenticating..."
@@ -72,6 +73,9 @@ ApplicationWindow {
         onPromptReceived: (id, kind, message, echo) => {
             setPrompt(id, kind, message, echo)
         }
+        onMessageReceived: (kind, message) => {
+            statusText.text = message
+        }
     }
 
     Component.onCompleted: {
@@ -79,7 +83,7 @@ ApplicationWindow {
             usernameField.text = defaultUser
         }
         if (lockUser && defaultUser.length === 0) {
-            statusText.text = "II_GREETD_DEFAULT_USER is required"
+            statusText.text = "TISS_GREETD_DEFAULT_USER is required"
         }
         if (lastSessionId.length > 0) {
             backend.selectedSessionId = lastSessionId
@@ -89,8 +93,8 @@ ApplicationWindow {
         }
         if (lastLocale.length > 0) {
             backend.selectedLocale = lastLocale
-        } else if (iiLocales && iiLocales.default) {
-            backend.selectedLocale = iiLocales.default
+        } else if (tissLocales && tissLocales.default) {
+            backend.selectedLocale = tissLocales.default
         }
         usernameField.forceActiveFocus()
     }
@@ -100,8 +104,15 @@ ApplicationWindow {
             statusText.text = "username is required"
             return
         }
+        if (lockUser && passwordField.text.length === 0) {
+            statusText.text = "password is required"
+            passwordField.forceActiveFocus()
+            return
+        }
+        var pass = passwordField.text
         statusText.text = ""
         clearPrompt()
+        stagedPromptResponse = pass
         backend.authenticate(lockUser ? defaultUser : usernameField.text)
     }
 
@@ -110,7 +121,24 @@ ApplicationWindow {
         promptKind = kind
         promptMessage = message
         promptEcho = echo
-        promptField.text = ""
+        if (promptNeedsInput) {
+            if (stagedPromptResponse.length > 0) {
+                if (promptKind === "secret") {
+                    backend.respondPrompt(promptId, stagedPromptResponse)
+                    stagedPromptResponse = ""
+                    passwordField.text = ""
+                    clearPrompt()
+                    return
+                }
+                promptField.text = stagedPromptResponse
+                stagedPromptResponse = ""
+                passwordField.text = ""
+            } else {
+                promptField.text = ""
+            }
+        } else {
+            promptField.text = ""
+        }
         if (promptNeedsInput) {
             promptField.forceActiveFocus()
         }
@@ -122,6 +150,8 @@ ApplicationWindow {
         promptMessage = ""
         promptEcho = true
         promptField.text = ""
+        stagedPromptResponse = ""
+        passwordField.text = ""
     }
 
     function submitPrompt() {
@@ -199,6 +229,7 @@ ApplicationWindow {
         }
 
         Rectangle {
+            id: loginCard
             width: 440
             radius: 18
             color: "#121620"
@@ -206,8 +237,11 @@ ApplicationWindow {
             border.width: 1
             Layout.alignment: Qt.AlignHCenter
             Layout.preferredWidth: 440
+            implicitWidth: 440
+            implicitHeight: cardContent.implicitHeight + 40
 
             ColumnLayout {
+                id: cardContent
                 anchors.fill: parent
                 anchors.margins: 20
                 spacing: 12
@@ -215,10 +249,20 @@ ApplicationWindow {
                 TextField {
                     id: usernameField
                     placeholderText: "Username"
-                    Layout.preferredWidth: 360
+                    Layout.fillWidth: true
                     readOnly: lockUser
                     visible: !lockUser
                     enabled: !busy
+                }
+
+                TextField {
+                    id: passwordField
+                    placeholderText: "Password"
+                    echoMode: root.showPassword ? TextInput.Normal : TextInput.Password
+                    Layout.fillWidth: true
+                    enabled: !busy
+                    visible: !root.promptActive
+                    onAccepted: root.doLogin()
                 }
 
                 Text {
@@ -230,14 +274,14 @@ ApplicationWindow {
                     horizontalAlignment: Text.AlignHCenter
                     Layout.alignment: Qt.AlignHCenter
                     wrapMode: Text.WordWrap
-                    Layout.preferredWidth: 360
+                    Layout.fillWidth: true
                 }
 
                 TextField {
                     id: promptField
                     placeholderText: root.promptKind === "secret" ? "Password" : "Response"
                     echoMode: (root.promptKind === "secret" && !root.showPassword) ? TextInput.Password : TextInput.Normal
-                    Layout.preferredWidth: 360
+                    Layout.fillWidth: true
                     enabled: !busy
                     visible: root.promptActive && root.promptNeedsInput
                     onAccepted: root.submitPrompt()
@@ -248,16 +292,17 @@ ApplicationWindow {
                     text: "Show password"
                     checked: root.showPassword
                     enabled: !busy
-                    visible: root.showPasswordToggle && root.promptKind === "secret"
+                    visible: root.showPasswordToggle
+                        && ((root.promptKind === "secret" && root.promptActive) || (!root.promptActive && lockUser))
                     onToggled: root.showPassword = checked
                 }
 
                 Button {
                     id: loginButton
                     text: busy ? "Working..." : "Continue"
-                    enabled: hasUser && !busy
+                    enabled: hasUser && !busy && (!lockUser || passwordField.text.length > 0)
                     visible: !root.promptActive
-                    Layout.preferredWidth: 200
+                    Layout.fillWidth: true
                     Layout.alignment: Qt.AlignHCenter
                     onClicked: root.doLogin()
                 }
@@ -267,7 +312,7 @@ ApplicationWindow {
                     text: root.promptNeedsInput ? "Submit" : "Continue"
                     enabled: !busy && (!root.promptNeedsInput || promptField.text.length > 0)
                     visible: root.promptActive
-                    Layout.preferredWidth: 200
+                    Layout.fillWidth: true
                     Layout.alignment: Qt.AlignHCenter
                     onClicked: root.submitPrompt()
                 }

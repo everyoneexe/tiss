@@ -1,24 +1,27 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::fs;
+use std::fs::File;
 use std::io::{self, BufRead, Write};
+use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 mod greetd;
 mod logging;
 mod protocol;
 
 fn default_command(log: &mut logging::Logger) -> Vec<String> {
-    if let Ok(cmd_json) = env::var("II_GREETD_SESSION_JSON") {
+    if let Ok(cmd_json) = env::var("TISS_GREETD_SESSION_JSON") {
         if let Ok(cmd) = serde_json::from_str::<Vec<String>>(&cmd_json) {
             if !cmd.is_empty() {
                 return cmd;
             }
         } else {
-            log.log("invalid II_GREETD_SESSION_JSON; falling back to default command");
+            log.log("invalid TISS_GREETD_SESSION_JSON; falling back to default command");
         }
     }
     vec!["niri".to_string()]
@@ -47,6 +50,24 @@ fn build_env(overrides: HashMap<String, String>) -> Vec<String> {
         .collect()
 }
 
+fn auth_timeout(log: &mut logging::Logger) -> Option<Duration> {
+    let value = env::var("TISS_GREETD_AUTH_TIMEOUT_SECS").unwrap_or_default();
+    if value.trim().is_empty() {
+        return None;
+    }
+    match value.trim().parse::<u64>() {
+        Ok(0) => None,
+        Ok(secs) => Some(Duration::from_secs(secs)),
+        Err(err) => {
+            log.log(&format!(
+                "invalid TISS_GREETD_AUTH_TIMEOUT_SECS='{}': {}",
+                value, err
+            ));
+            None
+        }
+    }
+}
+
 fn send_response(out: &mut dyn Write, resp: protocol::BackendResponse) -> Result<()> {
     let line = serde_json::to_string(&resp).context("serialize response")?;
     writeln!(out, "{}", line).context("write response")?;
@@ -60,6 +81,16 @@ fn send_error(out: &mut dyn Write, code: &str, message: impl Into<String>) -> Re
         protocol::BackendResponse::Error {
             code: code.to_string(),
             message: message.into(),
+        },
+    )
+}
+
+fn set_phase(out: &mut dyn Write, current: &Cell<&'static str>, phase: &'static str) -> Result<()> {
+    current.set(phase);
+    send_response(
+        out,
+        protocol::BackendResponse::State {
+            phase: phase.to_string(),
         },
     )
 }
@@ -107,17 +138,41 @@ fn prompt_kind(kind: greetd::AuthMessageType) -> (&'static str, bool) {
     match kind {
         greetd::AuthMessageType::Visible => ("visible", true),
         greetd::AuthMessageType::Secret => ("secret", false),
-        greetd::AuthMessageType::Info => ("info", true),
-        greetd::AuthMessageType::Error => ("error", true),
+        greetd::AuthMessageType::Info | greetd::AuthMessageType::Error => {
+            unreachable!("info/error prompts do not require responses")
+        }
+    }
+}
+
+fn message_kind(kind: greetd::AuthMessageType) -> &'static str {
+    match kind {
+        greetd::AuthMessageType::Info => "info",
+        greetd::AuthMessageType::Error => "error",
+        greetd::AuthMessageType::Visible | greetd::AuthMessageType::Secret => {
+            unreachable!("visible/secret messages require responses")
+        }
     }
 }
 
 fn wait_prompt_response(
     prompt_id: u64,
     reader: &mut dyn BufRead,
+    stdin_fd: std::os::unix::io::RawFd,
     out: &mut dyn Write,
+    timeout: Option<Duration>,
 ) -> greetd::AuthResult<Option<String>> {
+    let start = Instant::now();
     loop {
+        if let Some(timeout) = timeout {
+            let elapsed = start.elapsed();
+            let remaining = timeout.saturating_sub(elapsed);
+            if remaining.is_zero() {
+                return Err(greetd::AuthError::timeout());
+            }
+            if !poll_readable(stdin_fd, remaining).map_err(greetd::AuthError::from)? {
+                return Err(greetd::AuthError::timeout());
+            }
+        }
         let line = match read_line(reader)? {
             Some(line) => line,
             None => return Err(greetd::AuthError::pam_error("ui disconnected during auth")),
@@ -140,7 +195,7 @@ fn wait_prompt_response(
                 let _ = send_error(out, "pam_error", format!("unexpected prompt id: {}", id));
             }
             protocol::UiRequest::Cancel => {
-                return Err(greetd::AuthError::pam_error("auth cancelled"));
+                return Err(greetd::AuthError::cancelled());
             }
             protocol::UiRequest::Hello { .. } => {
                 continue;
@@ -152,29 +207,42 @@ fn wait_prompt_response(
     }
 }
 
+fn poll_readable(fd: std::os::unix::io::RawFd, timeout: Duration) -> Result<bool> {
+    let millis = timeout
+        .as_millis()
+        .min(i32::MAX as u128)
+        .try_into()
+        .unwrap_or(i32::MAX);
+    let mut pollfd = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let res = unsafe { libc::poll(&mut pollfd as *mut libc::pollfd, 1, millis) };
+    if res < 0 {
+        Err(std::io::Error::last_os_error()).context("poll stdin")?
+    }
+    Ok(res > 0)
+}
+
 fn state_path() -> std::path::PathBuf {
     if let Ok(path) = env::var("XDG_STATE_HOME") {
         if !path.trim().is_empty() {
-            return std::path::PathBuf::from(path).join("ii-greetd/state.json");
+            return std::path::PathBuf::from(path).join("tiss-greetd/state.json");
         }
     }
-    if let Ok(home) = env::var("HOME") {
-        if !home.trim().is_empty() {
-            return std::path::PathBuf::from(home).join(".local/state/ii-greetd/state.json");
-        }
-    }
-    std::path::PathBuf::from("/tmp/ii-greetd-state.json")
+    std::path::PathBuf::from("/var/lib/tiss-greetd/state.json")
 }
 
 fn load_sessions(log: &mut logging::Logger) -> HashMap<String, Vec<String>> {
-    let raw = env::var("II_GREETD_SESSIONS_JSON").unwrap_or_default();
+    let raw = env::var("TISS_GREETD_SESSIONS_JSON").unwrap_or_default();
     if raw.trim().is_empty() {
         return HashMap::new();
     }
     let entries: Vec<SessionListEntry> = match serde_json::from_str(&raw) {
         Ok(entries) => entries,
         Err(err) => {
-            log.log(&format!("invalid II_GREETD_SESSIONS_JSON: {}", err));
+            log.log(&format!("invalid TISS_GREETD_SESSIONS_JSON: {}", err));
             return HashMap::new();
         }
     };
@@ -189,14 +257,14 @@ fn load_sessions(log: &mut logging::Logger) -> HashMap<String, Vec<String>> {
 }
 
 fn load_profiles(log: &mut logging::Logger) -> HashMap<String, ProfileEntry> {
-    let raw = env::var("II_GREETD_PROFILES_JSON").unwrap_or_default();
+    let raw = env::var("TISS_GREETD_PROFILES_JSON").unwrap_or_default();
     if raw.trim().is_empty() {
         return HashMap::new();
     }
     let entries: Vec<ProfileEntry> = match serde_json::from_str(&raw) {
         Ok(entries) => entries,
         Err(err) => {
-            log.log(&format!("invalid II_GREETD_PROFILES_JSON: {}", err));
+            log.log(&format!("invalid TISS_GREETD_PROFILES_JSON: {}", err));
             return HashMap::new();
         }
     };
@@ -211,15 +279,34 @@ fn load_profiles(log: &mut logging::Logger) -> HashMap<String, ProfileEntry> {
 }
 
 fn load_power_actions(log: &mut logging::Logger) -> HashSet<String> {
-    let raw = env::var("II_GREETD_POWER_ACTIONS_JSON").unwrap_or_default();
+    let raw = env::var("TISS_GREETD_POWER_ACTIONS_JSON").unwrap_or_default();
     if raw.trim().is_empty() {
         return HashSet::new();
     }
     let entries: Vec<String> = match serde_json::from_str(&raw) {
         Ok(entries) => entries,
         Err(err) => {
-            log.log(&format!("invalid II_GREETD_POWER_ACTIONS_JSON: {}", err));
+            log.log(&format!("invalid TISS_GREETD_POWER_ACTIONS_JSON: {}", err));
             return HashSet::new();
+        }
+    };
+    entries
+        .into_iter()
+        .map(|entry| entry.trim().to_ascii_lowercase())
+        .filter(|entry| !entry.is_empty())
+        .collect()
+}
+
+fn load_power_allowed_states(log: &mut logging::Logger) -> HashSet<String> {
+    let raw = env::var("TISS_GREETD_POWER_ALLOWED_STATES_JSON").unwrap_or_default();
+    if raw.trim().is_empty() {
+        return ["idle".to_string()].into_iter().collect();
+    }
+    let entries: Vec<String> = match serde_json::from_str(&raw) {
+        Ok(entries) => entries,
+        Err(err) => {
+            log.log(&format!("invalid TISS_GREETD_POWER_ALLOWED_STATES_JSON: {}", err));
+            return ["idle".to_string()].into_iter().collect();
         }
     };
     entries
@@ -262,12 +349,62 @@ fn write_state(state: &PersistedState, log: &mut logging::Logger) {
     }
     match serde_json::to_vec(state) {
         Ok(payload) => {
-            if let Err(err) = fs::write(&path, payload) {
-                log.log(&format!("failed to write state {}: {}", path.display(), err));
+            let tmp_path = path.with_extension("json.tmp");
+            match File::create(&tmp_path) {
+                Ok(mut file) => {
+                    if let Err(err) = file.write_all(&payload) {
+                        log.log(&format!("failed to write state {}: {}", tmp_path.display(), err));
+                        return;
+                    }
+                    if let Err(err) = file.sync_all() {
+                        log.log(&format!("failed to fsync state {}: {}", tmp_path.display(), err));
+                        return;
+                    }
+                    if let Err(err) = fs::rename(&tmp_path, &path) {
+                        log.log(&format!("failed to replace state {}: {}", path.display(), err));
+                    }
+                }
+                Err(err) => {
+                    log.log(&format!("failed to create state {}: {}", tmp_path.display(), err));
+                }
             }
         }
         Err(err) => {
             log.log(&format!("failed to serialize state: {}", err));
+        }
+    }
+}
+
+fn wait_for_ack(reader: &mut dyn BufRead, log: &mut logging::Logger) -> Result<()> {
+    loop {
+        let line = match read_line(reader)? {
+            Some(line) => line,
+            None => {
+                log.log("ui disconnected while waiting for success ack");
+                return Ok(());
+            }
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        let req = match parse_request(&line) {
+            Ok(req) => req,
+            Err(err) => {
+                log.log(&format!("invalid json while waiting for ack: {}", err));
+                continue;
+            }
+        };
+        match req {
+            protocol::UiRequest::Ack { kind } => {
+                if kind == "success" {
+                    log.log("received success ack");
+                    return Ok(());
+                }
+                log.log(&format!("unexpected ack kind: {}", kind));
+            }
+            _ => {
+                log.log("ignoring request while waiting for success ack");
+            }
         }
     }
 }
@@ -328,17 +465,19 @@ fn request_power_action(action: &str) -> std::result::Result<(), String> {
 fn main() -> Result<()> {
     let stdin = io::stdin();
     let mut stdin_lock = stdin.lock();
+    let stdin_fd = stdin.as_raw_fd();
     let stdout = Rc::new(RefCell::new(io::stdout()));
     let mut log = logging::Logger::new("backend");
+    let current_phase = Cell::new("idle");
 
     log.log("backend start");
     let sessions = load_sessions(&mut log);
     let profiles = load_profiles(&mut log);
     let power_actions = load_power_actions(&mut log);
-    send_response(
-        &mut *stdout.borrow_mut(),
-        protocol::BackendResponse::State { phase: "idle".into() },
-    )?;
+    let power_allowed_states = load_power_allowed_states(&mut log);
+    let auth_timeout = auth_timeout(&mut log);
+    let mut auth_attempts: u64 = 0;
+    set_phase(&mut *stdout.borrow_mut(), &current_phase, "idle")?;
 
     loop {
         let line = match read_line(&mut stdin_lock)? {
@@ -360,10 +499,7 @@ fn main() -> Result<()> {
         match req {
             protocol::UiRequest::Hello { ui_version } => {
                 log.log(&format!("request: hello ui_version={}", ui_version));
-                send_response(
-                    &mut *stdout.borrow_mut(),
-                    protocol::BackendResponse::State { phase: "idle".into() },
-                )?;
+                set_phase(&mut *stdout.borrow_mut(), &current_phase, "idle")?;
             }
             protocol::UiRequest::Auth {
                 username,
@@ -373,17 +509,16 @@ fn main() -> Result<()> {
                 profile_id,
                 locale,
             } => {
-                log.log(&format!("request: auth user={}", username));
-                send_response(
-                    &mut *stdout.borrow_mut(),
-                    protocol::BackendResponse::State { phase: "auth".into() },
-                )?;
+                auth_attempts += 1;
+                let auth_started = Instant::now();
+                log.log(&format!(
+                    "request: auth attempt={} user={}",
+                    auth_attempts, username
+                ));
+                set_phase(&mut *stdout.borrow_mut(), &current_phase, "auth")?;
                 let username = username.trim().to_string();
                 if username.is_empty() {
-                    send_response(
-                        &mut *stdout.borrow_mut(),
-                        protocol::BackendResponse::State { phase: "error".into() },
-                    )?;
+                    set_phase(&mut *stdout.borrow_mut(), &current_phase, "error")?;
                     send_error(
                         &mut *stdout.borrow_mut(),
                         "pam_error",
@@ -450,29 +585,52 @@ fn main() -> Result<()> {
                 let mut prompt_id = 0u64;
                 let stdout_for_prompt = Rc::clone(&stdout);
                 let stdout_for_wait = Rc::clone(&stdout);
-                let mut prompt_handler = |kind: greetd::AuthMessageType, message: &str| -> greetd::AuthResult<Option<String>> {
-                    prompt_id += 1;
-                    let (kind_str, echo) = prompt_kind(kind);
-                    {
-                        let mut out = stdout_for_prompt.borrow_mut();
-                        send_response(
-                            &mut *out,
-                            protocol::BackendResponse::Prompt {
-                                id: prompt_id,
-                                kind: kind_str.to_string(),
-                                message: message.to_string(),
-                                echo,
-                            },
-                        )?;
-                    }
-                    let mut out = stdout_for_prompt.borrow_mut();
-                    wait_prompt_response(prompt_id, &mut stdin_lock, &mut *out)
-                };
+                let mut prompt_handler =
+                    |kind: greetd::AuthMessageType,
+                     message: &str|
+                     -> greetd::AuthResult<Option<String>> {
+                        match kind {
+                            greetd::AuthMessageType::Visible | greetd::AuthMessageType::Secret => {
+                                prompt_id += 1;
+                                let (kind_str, echo) = prompt_kind(kind);
+                                {
+                                    let mut out = stdout_for_prompt.borrow_mut();
+                                    send_response(
+                                        &mut *out,
+                                        protocol::BackendResponse::Prompt {
+                                            id: prompt_id,
+                                            kind: kind_str.to_string(),
+                                            message: message.to_string(),
+                                            echo,
+                                        },
+                                    )?;
+                                }
+                                let mut out = stdout_for_prompt.borrow_mut();
+                                wait_prompt_response(
+                                    prompt_id,
+                                    &mut stdin_lock,
+                                    stdin_fd,
+                                    &mut *out,
+                                    auth_timeout,
+                                )
+                            }
+                            greetd::AuthMessageType::Info | greetd::AuthMessageType::Error => {
+                                let kind_str = message_kind(kind);
+                                let mut out = stdout_for_prompt.borrow_mut();
+                                send_response(
+                                    &mut *out,
+                                    protocol::BackendResponse::Message {
+                                        kind: kind_str.to_string(),
+                                        message: message.to_string(),
+                                    },
+                                )?;
+                                Ok(None)
+                            }
+                        }
+                    };
                 let mut on_waiting = || {
-                    let _ = send_response(
-                        &mut *stdout_for_wait.borrow_mut(),
-                        protocol::BackendResponse::State { phase: "waiting".into() },
-                    );
+                    let _ =
+                        set_phase(&mut *stdout_for_wait.borrow_mut(), &current_phase, "waiting");
                 };
                 match greetd::authenticate_and_start(
                     &username,
@@ -490,24 +648,38 @@ fn main() -> Result<()> {
                             locale.as_deref(),
                             &mut log,
                         );
-                        send_response(
-                            &mut *stdout.borrow_mut(),
-                            protocol::BackendResponse::State { phase: "success".into() },
-                        )?;
+                        set_phase(&mut *stdout.borrow_mut(), &current_phase, "success")?;
                         send_response(&mut *stdout.borrow_mut(), protocol::BackendResponse::Success)?;
+                        wait_for_ack(&mut stdin_lock, &mut log)?;
+                        log.log(&format!(
+                            "auth attempt={} success in {}ms",
+                            auth_attempts,
+                            auth_started.elapsed().as_millis()
+                        ));
                         return Ok(());
                     }
                     Err(err) => {
                         log.log(&format!("auth failed: {}", err));
-                        send_response(
-                            &mut *stdout.borrow_mut(),
-                            protocol::BackendResponse::State { phase: "error".into() },
-                        )?;
-                        send_error(
-                            &mut *stdout.borrow_mut(),
-                            err.code().as_str(),
-                            err.message(),
-                        )?;
+                        log.log(&format!(
+                            "auth attempt={} failed in {}ms",
+                            auth_attempts,
+                            auth_started.elapsed().as_millis()
+                        ));
+                        if err.return_to_idle() {
+                            send_error(
+                                &mut *stdout.borrow_mut(),
+                                err.code().as_str(),
+                                err.message(),
+                            )?;
+                            set_phase(&mut *stdout.borrow_mut(), &current_phase, "idle")?;
+                        } else {
+                            set_phase(&mut *stdout.borrow_mut(), &current_phase, "error")?;
+                            send_error(
+                                &mut *stdout.borrow_mut(),
+                                err.code().as_str(),
+                                err.message(),
+                            )?;
+                        }
                     }
                 }
             }
@@ -517,10 +689,7 @@ fn main() -> Result<()> {
                     command,
                     env.len()
                 ));
-                send_response(
-                    &mut *stdout.borrow_mut(),
-                    protocol::BackendResponse::State { phase: "waiting".into() },
-                )?;
+                set_phase(&mut *stdout.borrow_mut(), &current_phase, "waiting")?;
                 send_error(
                     &mut *stdout.borrow_mut(),
                     "pam_error",
@@ -537,11 +706,22 @@ fn main() -> Result<()> {
                     "no active auth session",
                 )?;
             }
+            protocol::UiRequest::Ack { .. } => {
+                send_error(&mut *stdout.borrow_mut(), "pam_error", "unexpected ack")?;
+            }
             protocol::UiRequest::Power { action } => {
                 let action = action.trim().to_ascii_lowercase();
                 log.log(&format!("request: power {}", action));
                 if action.is_empty() {
                     send_error(&mut *stdout.borrow_mut(), "power_error", "power action missing")?;
+                    continue;
+                }
+                if !power_allowed_states.contains(current_phase.get()) {
+                    send_error(
+                        &mut *stdout.borrow_mut(),
+                        "power_denied",
+                        format!("power action not allowed during {}", current_phase.get()),
+                    )?;
                     continue;
                 }
                 if !power_actions.contains(&action) {

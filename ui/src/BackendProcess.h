@@ -24,6 +24,7 @@ public:
     Q_INVOKABLE void cancelAuth();
     Q_INVOKABLE void startSession(const QStringList &command);
     Q_INVOKABLE void requestPower(const QString &action);
+    Q_INVOKABLE void ackSuccess();
 
     QString phase() const { return m_phase; }
     bool busy() const { return m_phase == "auth" || m_phase == "waiting"; }
@@ -42,6 +43,7 @@ public:
 signals:
     void phaseChanged();
     void promptReceived(int id, const QString &kind, const QString &message, bool echo);
+    void messageReceived(const QString &kind, const QString &message);
     void errorReceived(const QString &code, const QString &message);
     void success();
     void backendCrashed(const QString &message);
