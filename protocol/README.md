@@ -22,7 +22,7 @@ One JSON object per line. UTF-8 encoded text.
 { "type": "state", "phase": "error" }
 { "type": "state", "phase": "success" }
 { "type": "prompt", "id": 1, "kind": "secret", "message": "Password:", "echo": false }
-{ "type": "prompt", "id": 2, "kind": "info", "message": "Password expired", "echo": true }
+{ "type": "message", "kind": "info", "message": "Password expired" }
 { "type": "error", "code": "auth_failed", "message": "Authentication failed" }
 { "type": "success" }
 ```
@@ -34,6 +34,11 @@ One JSON object per line. UTF-8 encoded text.
 - `waiting`: session start requested and waiting for greetd to respond.
 - `error`: last authentication failed; error message follows via `error` payload.
 - `success`: authentication succeeded and session will start.
+
+Message events (non-blocking):
+
+- `kind`: `info` or `error`
+- `message`: PAM informational/error text
 
 Auth errors are normalized with explicit codes:
 

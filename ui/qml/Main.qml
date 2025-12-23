@@ -2,7 +2,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Window 2.15
-import IIGreetd 1.0
+import TissGreetd 1.0
 
 ApplicationWindow {
     id: root
@@ -10,18 +10,18 @@ ApplicationWindow {
     width: outputReady ? Screen.width : 1280
     height: outputReady ? Screen.height : 720
     visible: outputReady
-    title: "ii-greetd"
+    title: "tiss-greetd"
     color: "#0e0f12"
 
-    property string defaultUser: iiDefaultUser
-    property bool lockUser: iiLockUser
+    property string defaultUser: tissDefaultUser
+    property bool lockUser: tissLockUser
     property bool busy: backend.busy
     property bool hasUser: (lockUser ? defaultUser.length > 0 : usernameField.text.length > 0)
     property bool showPassword: false
-    property bool showPasswordToggle: iiShowPasswordToggle
-    property string lastSessionId: iiLastSessionId
-    property string lastProfileId: iiLastProfileId
-    property string lastLocale: iiLastLocale
+    property bool showPasswordToggle: tissShowPasswordToggle
+    property string lastSessionId: tissLastSessionId
+    property string lastProfileId: tissLastProfileId
+    property string lastLocale: tissLastLocale
     property int promptId: -1
     property string promptKind: ""
     property string promptMessage: ""
@@ -29,11 +29,12 @@ ApplicationWindow {
     property bool promptEcho: true
     property bool promptActive: promptId >= 0
     property bool promptNeedsInput: promptKind === "visible" || promptKind === "secret"
+    property string stagedPromptResponse: ""
 
     BackendProcess {
         id: backend
-        sessionCommand: iiSessionCommand
-        sessionEnv: iiSessionEnv
+        sessionCommand: tissSessionCommand
+        sessionEnv: tissSessionEnv
         onPhaseChanged: {
             if (phase === "auth") {
                 statusText.text = "Authenticating..."
@@ -51,8 +52,10 @@ ApplicationWindow {
             clearPrompt()
             if (promptNeedsInput) {
                 promptField.forceActiveFocus()
-            } else {
+            } else if (!lockUser) {
                 usernameField.forceActiveFocus()
+            } else {
+                passwordField.forceActiveFocus()
             }
         }
         onBackendCrashed: message => {
@@ -61,8 +64,10 @@ ApplicationWindow {
             clearPrompt()
             if (promptNeedsInput) {
                 promptField.forceActiveFocus()
-            } else {
+            } else if (!lockUser) {
                 usernameField.forceActiveFocus()
+            } else {
+                passwordField.forceActiveFocus()
             }
         }
         onSuccess: {
@@ -72,6 +77,9 @@ ApplicationWindow {
         onPromptReceived: (id, kind, message, echo) => {
             setPrompt(id, kind, message, echo)
         }
+        onMessageReceived: (kind, message) => {
+            statusText.text = message
+        }
     }
 
     Component.onCompleted: {
@@ -79,7 +87,7 @@ ApplicationWindow {
             usernameField.text = defaultUser
         }
         if (lockUser && defaultUser.length === 0) {
-            statusText.text = "II_GREETD_DEFAULT_USER is required"
+            statusText.text = "TISS_GREETD_DEFAULT_USER is required"
         }
         if (lastSessionId.length > 0) {
             backend.selectedSessionId = lastSessionId
@@ -89,8 +97,8 @@ ApplicationWindow {
         }
         if (lastLocale.length > 0) {
             backend.selectedLocale = lastLocale
-        } else if (iiLocales && iiLocales.default) {
-            backend.selectedLocale = iiLocales.default
+        } else if (tissLocales && tissLocales.default) {
+            backend.selectedLocale = tissLocales.default
         }
         usernameField.forceActiveFocus()
     }
@@ -100,8 +108,15 @@ ApplicationWindow {
             statusText.text = "username is required"
             return
         }
+        if (lockUser && passwordField.text.length === 0) {
+            statusText.text = "password is required"
+            passwordField.forceActiveFocus()
+            return
+        }
+        var pass = passwordField.text
         statusText.text = ""
         clearPrompt()
+        stagedPromptResponse = pass
         backend.authenticate(lockUser ? defaultUser : usernameField.text)
     }
 
@@ -110,7 +125,24 @@ ApplicationWindow {
         promptKind = kind
         promptMessage = message
         promptEcho = echo
-        promptField.text = ""
+        if (promptNeedsInput) {
+            if (stagedPromptResponse.length > 0) {
+                if (promptKind === "secret") {
+                    backend.respondPrompt(promptId, stagedPromptResponse)
+                    stagedPromptResponse = ""
+                    passwordField.text = ""
+                    clearPrompt()
+                    return
+                }
+                promptField.text = stagedPromptResponse
+                stagedPromptResponse = ""
+                passwordField.text = ""
+            } else {
+                promptField.text = ""
+            }
+        } else {
+            promptField.text = ""
+        }
         if (promptNeedsInput) {
             promptField.forceActiveFocus()
         }
@@ -122,6 +154,8 @@ ApplicationWindow {
         promptMessage = ""
         promptEcho = true
         promptField.text = ""
+        stagedPromptResponse = ""
+        passwordField.text = ""
     }
 
     function submitPrompt() {
@@ -195,6 +229,17 @@ ApplicationWindow {
             enabled: !busy
         }
 
+        TextField {
+            id: passwordField
+            placeholderText: "Password"
+            echoMode: root.showPassword ? TextInput.Normal : TextInput.Password
+            Layout.preferredWidth: 360
+            Layout.alignment: Qt.AlignHCenter
+            enabled: !busy
+            visible: !root.promptActive
+            onAccepted: root.doLogin()
+        }
+
         Text {
             id: promptLabel
             text: root.promptMessage
@@ -223,7 +268,8 @@ ApplicationWindow {
             text: "Show password"
             checked: root.showPassword
             enabled: !busy
-            visible: root.showPasswordToggle && root.promptKind === "secret"
+            visible: root.showPasswordToggle
+                && ((root.promptKind === "secret" && root.promptActive) || (!root.promptActive && lockUser))
             Layout.alignment: Qt.AlignHCenter
             onToggled: root.showPassword = checked
         }
@@ -231,7 +277,7 @@ ApplicationWindow {
         Button {
             id: loginButton
             text: busy ? "Working..." : "Continue"
-            enabled: hasUser && !busy
+            enabled: hasUser && !busy && (!lockUser || passwordField.text.length > 0)
             visible: !root.promptActive
             Layout.preferredWidth: 200
             Layout.alignment: Qt.AlignHCenter

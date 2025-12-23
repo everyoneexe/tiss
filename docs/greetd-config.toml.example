@@ -5,5 +5,5 @@
 vt = 1
 
 [default_session]
-command = "/usr/bin/env II_GREETD_DEFAULT_USER=YOUR_USER II_GREETD_LOCK_USER=1 II_GREETD_SESSION_JSON='[\"niri\"]' /usr/bin/ii-greetd-launcher"
+command = "/usr/bin/env TISS_GREETD_DEFAULT_USER=YOUR_USER TISS_GREETD_LOCK_USER=1 TISS_GREETD_SESSION_JSON='[\"niri\"]' /usr/bin/tiss-greetd-launcher"
 user = "greeter"

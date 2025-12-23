@@ -27,6 +27,8 @@ pub enum UiRequest {
     },
     #[serde(rename = "cancel")]
     Cancel,
+    #[serde(rename = "ack")]
+    Ack { kind: String },
     #[serde(rename = "start")]
     Start { command: Vec<String>, #[serde(default)] env: std::collections::HashMap<String, String> },
     #[serde(rename = "power")]
@@ -45,6 +47,8 @@ pub enum BackendResponse {
         message: String,
         echo: bool,
     },
+    #[serde(rename = "message")]
+    Message { kind: String, message: String },
     #[serde(rename = "error")]
     Error { code: String, message: String },
     #[serde(rename = "success")]

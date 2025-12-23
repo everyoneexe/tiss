@@ -113,6 +113,13 @@ void BackendProcess::requestPower(const QString &action) {
     sendJson(obj);
 }
 
+void BackendProcess::ackSuccess() {
+    QJsonObject obj;
+    obj.insert("type", "ack");
+    obj.insert("kind", "success");
+    sendJson(obj);
+}
+
 void BackendProcess::setSessionCommand(const QStringList &command) {
     if (m_sessionCommand == command) {
         return;
@@ -172,11 +179,16 @@ void BackendProcess::handleStdout() {
                 obj.value("kind").toString(),
                 obj.value("message").toString(),
                 obj.value("echo").toBool());
+        } else if (type == "message") {
+            emit messageReceived(
+                obj.value("kind").toString(),
+                obj.value("message").toString());
         } else if (type == "error") {
             const QString code = obj.value("code").toString();
             emit errorReceived(code.isEmpty() ? QStringLiteral("pam_error") : code,
                                obj.value("message").toString());
         } else if (type == "success") {
+            ackSuccess();
             m_allowExit = true;
             m_phase = "success";
             emit phaseChanged();
@@ -227,17 +239,17 @@ void BackendProcess::handleError(QProcess::ProcessError error) {
 }
 
 QString BackendProcess::resolveBackendPath() const {
-    const QString envPath = qEnvironmentVariable("II_GREETD_BACKEND");
+    const QString envPath = qEnvironmentVariable("TISS_GREETD_BACKEND");
     if (!envPath.isEmpty()) {
         return envPath;
     }
 
     const QString appDir = QCoreApplication::applicationDirPath();
     const QStringList candidates = {
-        QDir(appDir).filePath("ii-greetd-backend"),
-        QDir(appDir).filePath("../lib/ii-greetd/ii-greetd-backend"),
-        "/usr/lib/ii-greetd/ii-greetd-backend",
-        "/usr/local/lib/ii-greetd/ii-greetd-backend",
+        QDir(appDir).filePath("tiss-greetd-backend"),
+        QDir(appDir).filePath("../lib/tiss-greetd/tiss-greetd-backend"),
+        "/usr/lib/tiss-greetd/tiss-greetd-backend",
+        "/usr/local/lib/tiss-greetd/tiss-greetd-backend",
     };
 
     for (const auto &candidate : candidates) {
@@ -247,12 +259,12 @@ QString BackendProcess::resolveBackendPath() const {
         }
     }
 
-    const QString inPath = QStandardPaths::findExecutable("ii-greetd-backend");
+    const QString inPath = QStandardPaths::findExecutable("tiss-greetd-backend");
     if (!inPath.isEmpty()) {
         return inPath;
     }
 
-    return "ii-greetd-backend";
+    return "tiss-greetd-backend";
 }
 
 void BackendProcess::sendJson(const QJsonObject &obj) {

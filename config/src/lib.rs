@@ -78,6 +78,8 @@ pub struct Locales {
 pub struct Power {
     #[serde(default)]
     pub enabled: Vec<String>,
+    #[serde(default)]
+    pub allowed_states: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -168,6 +170,11 @@ impl Power {
     fn merge(self, other: Power) -> Power {
         Power {
             enabled: if other.enabled.is_empty() { self.enabled } else { other.enabled },
+            allowed_states: if other.allowed_states.is_empty() {
+                self.allowed_states
+            } else {
+                other.allowed_states
+            },
         }
     }
 }
