@@ -71,3 +71,7 @@ Launcher overrides:
 - `TISS_GREETD_BACKEND`: absolute path to `tiss-greetd-backend`.
 - `TISS_GREETD_QML_FILE`: absolute path to `Main.qml`.
 - `TISS_GREETD_CAGE_ARGS`: extra args passed to `cage` (e.g. `"-d"`).
+
+Appearance exporter:
+
+See `docs/APPEARANCE.md` for generating `appearance.json`.
