@@ -92,6 +92,7 @@ to `/usr/share/tiss-greetd/config.toml.example`).
 
 - `docs/CORE_HARDENING.md`: core hardening summary and validation checklist.
 - `docs/PAM.md`: prompt/message contract, typed errors, and distro policy.
+- `docs/THEME_AUTHORING.md`: how to build themes and handle prompts.
 - `docs/WHY_NOT_SDDM.md`: design intent vs SDDM.
 
 ## Environment variables
