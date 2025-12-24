@@ -280,10 +280,8 @@ fn configure_profiles_locales(config: &Config, state: &PersistedState) {
 }
 
 fn configure_power(config: &Config) {
-    if config.power.enabled.is_empty() {
-        if config.power.allowed_states.is_empty() {
-            return;
-        }
+    if config.power.enabled.is_empty() && config.power.allowed_states.is_empty() {
+        return;
     }
     if !config.power.allowed_states.is_empty() {
         if let Ok(json) = serde_json::to_string(&config.power.allowed_states) {

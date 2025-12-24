@@ -10,6 +10,9 @@ set(CMAKE_AUTOUIC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2)
 
+qt_policy(SET QTP0001 NEW)
+qt_policy(SET QTP0004 NEW)
+
 qt_add_executable(tiss-greetd-ui
     src/main.cpp
     src/BackendProcess.cpp
@@ -34,6 +37,7 @@ add_library(tiss-compat-qml STATIC)
 qt_add_qml_module(tiss-compat-qml
     URI TissCompat
     VERSION 1.0
+    OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/TissCompat
     QML_FILES
         qml/TissCompat/Token.qml
         qml/TissCompat/Scene.qml
@@ -42,7 +46,6 @@ qt_add_qml_module(tiss-compat-qml
         qml/TissCompat/Clock.qml
         qml/TissCompat/StatusBanner.qml
         qml/TissCompat/AuthCard.qml
-        qml/TissCompat/qmldir
 )
 
 target_link_libraries(tiss-greetd-ui

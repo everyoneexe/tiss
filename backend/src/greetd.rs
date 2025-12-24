@@ -345,10 +345,8 @@ fn map_pam_token(token: &str) -> Option<AuthFailureKind> {
 }
 
 fn zero_request(req: &mut Request) {
-    if let Request::PostAuthMessageResponse { response } = req {
-        if let Some(ref mut value) = response {
-            zero_string(value);
-        }
+    if let Request::PostAuthMessageResponse { response: Some(ref mut value) } = req {
+        zero_string(value);
     }
 }
 

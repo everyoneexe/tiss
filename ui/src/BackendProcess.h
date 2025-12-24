@@ -53,6 +53,7 @@ private slots:
     void handleStdout();
     void handleFinished(int exitCode, QProcess::ExitStatus status);
     void handleError(QProcess::ProcessError error);
+    void sendHello();
 
 private:
     void startBackend();
