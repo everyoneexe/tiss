@@ -30,6 +30,7 @@ void BackendProcess::startBackend() {
     connect(&m_proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, &BackendProcess::handleFinished);
     connect(&m_proc, &QProcess::errorOccurred, this, &BackendProcess::handleError);
+    connect(&m_proc, &QProcess::started, this, &BackendProcess::sendHello);
 
     m_proc.start();
 }
@@ -265,6 +266,13 @@ QString BackendProcess::resolveBackendPath() const {
     }
 
     return "tiss-greetd-backend";
+}
+
+void BackendProcess::sendHello() {
+    QJsonObject obj;
+    obj.insert("type", "hello");
+    obj.insert("ui_version", 2);
+    sendJson(obj);
 }
 
 void BackendProcess::sendJson(const QJsonObject &obj) {

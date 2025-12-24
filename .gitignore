@@ -2,14 +2,19 @@
 /backend/target/
 /config/target/
 /launcher/target/
+/target/
 
 # Qt / CMake
 /ui/build/
+/ui/build-*/
 /ui/.qt/
 /build-ui/
-/target/
 
 # Editors
 *.swp
 *.swo
 .DS_Store
+*~
+
+# Logs
+*.log

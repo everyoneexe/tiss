@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.1 - 2025-12-25
+
+- Core stabilized with clippy/qmllint clean builds.
+- Backend sends hello handshake on startup.
+- CMake Qt6 policy warnings resolved.
+- PAM edge cases handled best-effort.
+- Session/profile/locale selection complete.
+- No breaking changes from v0.1.0.
+
 ## v0.1.0 - 2025-12-22
 
 - greetd backend with PAM prompt forwarding and structured error codes.
